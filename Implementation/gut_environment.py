@@ -13,6 +13,30 @@ import yaml
 class Log:
     pass
 
+@jitclass(spec)
+class GridNghFinder:
+
+    def __init__(self, xmin, ymin, xmax, ymax):
+        self.mo = np.array([-1, 0, 1, -1, 0, 1, -1, 0, 1], dtype=np.int32)
+        self.no = np.array([1, 1, 1, 0, 0, 0, -1, -1, -1], dtype=np.int32)
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+
+    def find(self, x, y):
+        xs = self.mo + x
+        ys = self.no + y
+
+        xd = (xs >= self.xmin) & (xs <= self.xmax)
+        xs = xs[xd]
+        ys = ys[xd]
+
+        yd = (ys >= self.ymin) & (ys <= self.ymax)
+        xs = xs[yd]
+        ys = ys[yd]
+
+        return np.stack((xs, ys, np.zeros(len(ys), dtype=np.int32)), axis=-1)
 
 class AEP(core.Agent):
 
@@ -31,7 +55,44 @@ class AEP(core.Agent):
         self.state =  params["aep_state.hyperactive"]
 
     def step(self):
-        pass
+        #Take the agent position and get all the nghs 
+        grid = model.grid
+        pt = grid.get_location(self)
+        nghs = model.ngh_finder.find(pt.x, pt.y)
+
+        empty_nghs = [ngh for ngh in nghs if not grid.is_cell_occupied(ngh)]
+        not_empty_nghs = [ngh for ngh in nghs if grid.is_cell_occupied(ngh)]
+
+        if empty_nghs:            
+            #Randomly select a ngh cell
+            random_ngh = random.choice(nghs)
+
+            #Calculate the direction toward the selected nghs
+            direction = (random_ngh - pt.coordinates[0:3]) * 0.25
+
+            #Move the agent randomly
+            cpt = model.space.get_location(self)
+            model.move(self, cpt.x + direction[0], cpt.y + direction[1])
+
+            x = self.percept(not_empty_nghs)
+            if x is not None:
+                self.cleave(x)
+
+    #enzima controlla se il vicino è una proteina
+    def percept(self, not_empty_nghs):
+        for ngh in not_empty_nghs:
+            if type(ngh) == Protein:
+                return ngh
+        return None    
+    
+                
+    #TODO           
+    #azione dell'enzima che taglia una proteina
+    def cleave(self,ngh):  
+        pass     
+
+
+
 
 
 class Protein(core.Agent):
