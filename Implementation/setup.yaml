@@ -17,6 +17,11 @@ alpha_syn_proteins : 10
 tau_oligomers : 0
 alpha_syn_oligomers : 0
 
+protein_name : {
+    tau: 0,
+    alpha_syn: 1
+}
+
 aep_state : {
     active: 0,
     hyperactive: 1
@@ -27,8 +32,9 @@ aep_state : {
 
 
 #model variables
-world.width: 50
-world.height: 50
+world.width: 10
+world.height: 10
+
 
 seed : 42
 

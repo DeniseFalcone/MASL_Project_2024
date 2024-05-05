@@ -121,15 +121,8 @@ class AEP(core.Agent):
     
     #TODO           
     #azione dell'enzima che taglia una proteina
-    def cleave(self, ngh):  
-        
-        #add two cleaved protein obtained from cutting the ngh protein
-        #model.add_cleaved_protein(ngh.name)
-        #model.add_cleaved_protein(ngh.name)
-
-        #delete the protein that is now cleaved
-        #model.remove_agent(ngh)
-        ngh.change_state()
+    def cleave(self, ngh):        
+        ngh.change_state()  
 
 
 class Protein(core.Agent):
@@ -230,7 +223,7 @@ class Model:
         #self.runner.schedule_repeating_event(1, 2, self.step2)
         #self.runner.schedule_repeating_event(1.1, 1, self.log_agents)
         #self.runner.schedule_stop(params['stop.at'])
-        self.runner.schedule_stop(50)
+        self.runner.schedule_stop(5)
         schedule.runner().schedule_end_event(self.at_end)
 
         # TODO context
@@ -252,7 +245,7 @@ class Model:
 
         self.rng = repast4py.random.default_rng
 
-        self.cleaved_id = 0
+        self.cleaved_id = params['aep_enzyme'] + params['alpha_syn_proteins'] + params['tau_proteins'] + params['alpha_syn_oligomers'] + params['tau_oligomers']
         self.oligomer_id = 0
 
         #add aep enzyme to the space
@@ -319,6 +312,9 @@ class Model:
     def add_cleaved_protein(self, protein_name): 
         self.cleaved_id += 1 
         pt = self.grid.get_random_local_pt(self.rng) 
+        while(self.grid.get_agent(pt) is not None):
+            pt = self.grid.get_random_local_pt(self.rng)
+        print("posizione scelta", pt,", id prot: ", self.cleaved_id)    
         cleaved_protein = CleavedProtein(self.cleaved_id, self.rank, pt, protein_name)
         self.context.add(cleaved_protein)    
         self.move(cleaved_protein, pt.x, pt.y)  
@@ -329,27 +325,45 @@ class Model:
         self.grid.move(agent, dpt(x, y)) 
         agent.pt =  dpt(x, y)
 
-
+    
+    
     def step(self):
-        print("Entro in uno step!")
+        for agent in self.context.agents():
+            print("Agenti prima di ogni cosa: ", agent," , ", agent.TYPE)
         for agent in self.context.agents():
             if(type(agent) == AEP):
                 agent.step()
 
         protein_to_remove = []
+        cleaved_protein_count = 0
+        protein_count = 0
+        
 
         for agent in self.context.agents():
             if(type(agent) == Protein and agent.cleaved == True):
                 protein_to_remove.append(agent)
 
-
+       
+        print("proteine da rimuovere", protein_to_remove)
         for agent in protein_to_remove:
-            self.remove_agent(agent)
-
+            protein_name = agent.name
+            self.remove_agent(agent)        
+            print("agent: ", agent.uid)         
+            self.add_cleaved_protein(protein_name)
+            self.add_cleaved_protein(protein_name)
         for agent in self.context.agents():
-            if(type(agent) == Protein):
-                print("Protein: ", agent.uid)
-      
+            print("Agenti dopo di ogni cosa: ", agent," , ", agent.TYPE)    
+                        
+        
+        for agent in self.context.agents():
+            if(type(agent) == CleavedProtein):
+                cleaved_protein_count = cleaved_protein_count + 1
+                #print("Protein: ", agent.uid)
+            elif(type(agent) == Protein):
+                protein_count = protein_count + 1
+        print("proteine rimanenti", protein_count)        
+        print("cleaved proteine", cleaved_protein_count)      
+        
         self.context.synchronize(restore_agent)
 
         tick = self.runner.schedule.tick
@@ -374,7 +388,7 @@ if __name__ == "__main__":
     params = parameters.init_params(args.parameters_file, args.parameters)
     
     #for debug
-    #stream = open("dcc_project_in_repast4py/setup.yaml", "r")
+    #stream = open("/home/chiaracintioni/Projects/MALezione1/PROJECT MASL/setup.yaml", "r")
     #params = yaml.load(stream)
     #params = params
 
