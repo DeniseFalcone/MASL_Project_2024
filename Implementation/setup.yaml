@@ -7,13 +7,15 @@ microbiota_good_bacteria_class : 30000
 microbiota_pathogenic_bacteria_class : 10000
 microbiota_diversity_threshold : 40000
 
+#to start the dysbyosis
 external_input : true
 
+#the treatment to use
 treatment : true
 
-aep_enzyme : 10
-tau_proteins : 10
-alpha_syn_proteins : 10
+aep_enzyme : 20
+tau_proteins : 20
+alpha_syn_proteins : 20
 tau_oligomers : 0
 alpha_syn_oligomers : 0
 

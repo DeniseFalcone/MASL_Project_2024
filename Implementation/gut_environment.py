@@ -94,8 +94,6 @@ class AEP(core.Agent):
             if x is not None:
                 self.cleave(x)
 
-        
-
     #enzyme checks if the neighbour is a Protein
     def percept(self, nghs_coordinates):
         for ngh_coordinate in nghs_coordinates:
@@ -154,6 +152,7 @@ class CleavedProtein(core.Agent):
         self.pt = pt #current location
         self.name = protein_name
         self.aggregates = False
+        self.nghs_cleaved = []
 
     def save(self) -> Tuple: 
         return (self.uid, self.name)
@@ -163,7 +162,8 @@ class CleavedProtein(core.Agent):
         pt = grid.get_location(self)
         nghs = model.ngh_finder.find(pt.x, pt.y)
 
-        if (self.has_cleaved_ngh(nghs) == 1):                    
+
+        if (self.has_cleaved_ngh(nghs) == 1):
             #Randomly select a ngh cell
             random_index = np.random.randint(0, len(nghs))
             random_ngh_coordinates = nghs[random_index]
@@ -174,17 +174,32 @@ class CleavedProtein(core.Agent):
                 #Move the agent randomly
                 model.move(self, random_ngh_coordinates[0], random_ngh_coordinates[1])
 
-            self.aggregates = False
-
         elif (self.has_cleaved_ngh(nghs) == 4):
+            self.aggregates = True
             for ngh in nghs:
                 ngh_dpt = dpt(ngh[0], ngh[1])
                 ngh_agent = model.grid.get_agent(ngh_dpt)
                 if (type(ngh_agent) == CleavedProtein and self.name == ngh_agent.name):
-                    ngh_agent.aggregates = True
-        else:
-            self.aggregates = False
-             
+                    self.nghs_cleaved.append(ngh_agent)
+
+    
+    #checks the state of the cleaved protein and if it's wrong it changes it back 
+    def check_status(self):
+        if self.aggregates == True:
+            grid = model.grid
+            pt = grid.get_location(self)
+            nghs = model.ngh_finder.find(pt.x, pt.y)
+
+            if (self.has_cleaved_ngh(nghs) < 4):   
+                for ngh in nghs:
+                    ngh_dpt = dpt(ngh[0], ngh[1])
+                    ngh_agent = model.grid.get_agent(ngh_dpt)
+                    if (type(ngh_agent) == CleavedProtein and self.name == ngh_agent.name):
+                        ngh_agent.aggregates = False 
+                return False
+            else:
+                return True
+
 
     def has_cleaved_ngh(self, nghs):
         nghs_cleaved = 0
@@ -367,6 +382,8 @@ class Model:
     def step(self):
         #for agent in self.context.agents():
         #    print("Agenti prima di ogni cosa: ", agent," , ", agent.TYPE)
+
+        #makes the agents in the context execute their step.
         for agent in self.context.agents():
             if(type(agent) == AEP):
                 agent.step()
@@ -375,22 +392,21 @@ class Model:
             elif(type(agent) == CleavedProtein):
                 agent.step()        
 
-        protein_to_remove = []
-        cleaved_protein_to_remove = []
-
-        cleaved_protein_count = 0
-        protein_count = 0
-        oligomer_count = 0
         
-
+        protein_to_remove = []
+        all_true_cleaved_aggregates = []
+        
+        #gets all the agents to remove
         for agent in self.context.agents():
             if(type(agent) == Protein and agent.cleaved == True):
                 protein_to_remove.append(agent)
             elif(type(agent) == CleavedProtein and agent.aggregates == True):
-                 cleaved_protein_to_remove.append(agent)     
+                all_true_cleaved_aggregates.append(agent)     
 
        
         #print("proteine da rimuovere", protein_to_remove)
+
+        #removes the protein that are not needed anymore
         for agent in protein_to_remove:
             protein_name = agent.name
             self.remove_agent(agent)        
@@ -399,39 +415,55 @@ class Model:
             self.add_cleaved_protein(protein_name)
 
 
-        cleaved_protein_to_remove_size = len(cleaved_protein_to_remove)
-        print(" Cont cleaved proteine da togliere: ", cleaved_protein_to_remove_size)        
+        cleaved_protein_to_remove_size = len(all_true_cleaved_aggregates)
+        print("AllTrueArray: ", cleaved_protein_to_remove_size)        
 
-        for agent in cleaved_protein_to_remove:
-            protein_name = agent.name            
-            self.remove_agent(agent)   
-            cleaved_protein_to_remove.remove(agent)     
-            #print("agent: ", agent.uid)     
-            print("Lunghezza nuova: ", len(cleaved_protein_to_remove))
-            if (cleaved_protein_to_remove_size - len(cleaved_protein_to_remove) == 4 or cleaved_protein_to_remove_size - len(cleaved_protein_to_remove) == 0):
-                self.add_oligomer_protein(protein_name)
+        #removes the cleaved protein that are not needed anymore
+        for agent in all_true_cleaved_aggregates:
+            if (self.context.agent(agent.uid) != None):
+                if (agent.check_status()):
+                    protein_name = agent.name  
+                    for i in range(0,4):
+                        x = agent.nghs_cleaved[i]
+                        self.remove_agent(x)  
+                    self.add_oligomer_protein(protein_name)
+                else:
+                    agent.nghs_cleaved = []
 
-        
-
+    
         '''
         PER STAMPARE
         print("STEP")
         for agent in self.context.agents():
             print("Agenti dopo di ogni cosa: ", agent," , ", agent.TYPE, ", posizione: ", agent.pt)    
-        '''                
+                  '''   
+        
+        cleaved_protein_count_alpha = 0
+        cleaved_protein_count_tau = 0
+        protein_count = 0
+        oligomer_count_alpha = 0
+        oligomer_count_tau = 0
         
         for agent in self.context.agents():
             if(type(agent) == Oligomer):
-                oligomer_count = oligomer_count + 1
+                if (agent.name == 1):
+                    oligomer_count_alpha += 1
+                else:
+                    oligomer_count_tau += 1
             if(type(agent) == CleavedProtein):
-                cleaved_protein_count = cleaved_protein_count + 1
-                #print("Protein: ", agent.uid)
+                if (agent.name == 1):
+                    cleaved_protein_count_alpha += 1
+                else:
+                    cleaved_protein_count_tau += 1
             elif(type(agent) == Protein):
                 protein_count = protein_count + 1
+
         print("Proteine intere rimanenti", protein_count)          
-        print("cleaved proteine rimanenti", cleaved_protein_count)  
-        print("oligomeri creati", oligomer_count)        
-            
+        print("cleaved proteine rimanenti tau", cleaved_protein_count_tau)  
+        print("cleaved proteine rimanenti alpha", cleaved_protein_count_alpha)  
+        print("oligomeri creati tau", oligomer_count_tau)  
+        print("oligomeri creati alpha", oligomer_count_alpha)              
+        
         
         self.context.synchronize(restore_agent)
 
@@ -452,13 +484,13 @@ def run(params: Dict):
 
 #execution function (when starting the program you have to pass the yaml file: setup.yaml)
 if __name__ == "__main__":
-    #parser = parameters.create_args_parser()
-    #args = parser.parse_args()
-    #params = parameters.init_params(args.parameters_file, args.parameters)
+    parser = parameters.create_args_parser()
+    args = parser.parse_args()
+    params = parameters.init_params(args.parameters_file, args.parameters)
     
     #for debug
-    stream = open("/home/chiaracintioni/Projects/MALezione1/PROJECT MASL/setup.yaml", "r")
-    params = yaml.load(stream)
-    params = params
+    #stream = open("/home/sakurahanami120/Projects/Multiagent/MASL_project/setup.yaml", "r")
+    #params = yaml.load(stream)
+    #params = params
 
     run(params)
