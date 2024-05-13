@@ -38,5 +38,7 @@ world.width: 10
 world.height: 10
 
 
-seed : 42
+#seed : 42
+
+agent_log_file: 'output/agent_log.csv'
 

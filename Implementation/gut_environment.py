@@ -11,13 +11,25 @@ import yaml
 import numba
 from numba import int32, int64
 from numba.experimental import jitclass
-
 import math
 
-# TODO: create logs
+
 @dataclass
 class Log:
-    pass
+    aep_active: int = 0
+    aep_hyperactive: int = 0
+    alpha_protein: int = 0
+    tau_protein: int = 0
+    alpha_cleaved: int = 0
+    tau_cleaved: int = 0
+    alpha_oligomer: int = 0
+    tau_oligomer: int = 0
+    barrier_permeability : int = 0
+    microbiota_good_bacteria_class : int = 0
+    microbiota_pathogenic_bacteria_class : int = 0
+    microbiota_diversity_threshold : int = 0
+
+
 
 @numba.jit((int64[:], int64[:]), nopython=True)
 def is_equal(a1, a2):
@@ -70,7 +82,7 @@ class AEP(core.Agent):
         self.state = params["aep_state"]["active"]
 
     def save(self) -> Tuple: 
-        return (self.uid, self.state)
+        return (self.uid, self.state, (self.pt.x, self.pt.y))
     
     def hyperactive(self):
         self.state =  params["aep_state"]["hyperactive"]
@@ -78,7 +90,7 @@ class AEP(core.Agent):
     def step(self):
         grid = model.grid
         pt = grid.get_location(self)
-        nghs = model.ngh_finder.find(pt.x, pt.y)
+        nghs = model.ngh_finder.find(self.pt.x, self.pt.y)
         
         #Randomly select a ngh cell
         random_index = np.random.randint(0, len(nghs))
@@ -92,6 +104,7 @@ class AEP(core.Agent):
         else: 
             x = self.percept(nghs)
             if x is not None:
+                self.hyperactive()
                 self.cleave(x)
 
     #enzyme checks if the neighbour is a Protein
@@ -120,12 +133,12 @@ class Protein(core.Agent):
         self.cleaved = False
 
     def save(self) -> Tuple: 
-        return (self.uid, self.name)
+        return (self.uid, self.name, (self.pt.x, self.pt.y))
 
     def step(self):
         grid = model.grid
         pt = grid.get_location(self)
-        nghs = model.ngh_finder.find(pt.x, pt.y)
+        nghs = model.ngh_finder.find(self.pt.x, self.pt.y)
         
         #Randomly select a ngh cell
         random_index = np.random.randint(0, len(nghs))
@@ -155,12 +168,12 @@ class CleavedProtein(core.Agent):
         self.nghs_cleaved = []
 
     def save(self) -> Tuple: 
-        return (self.uid, self.name)
+        return (self.uid, self.name, (self.pt.x, self.pt.y))
 
     def step(self):
         grid = model.grid
         pt = grid.get_location(self)
-        nghs = model.ngh_finder.find(pt.x, pt.y)
+        nghs = model.ngh_finder.find(self.pt.x, self.pt.y)
 
 
         if (self.has_cleaved_ngh(nghs) == 1):
@@ -188,7 +201,7 @@ class CleavedProtein(core.Agent):
         if self.aggregates == True:
             grid = model.grid
             pt = grid.get_location(self)
-            nghs = model.ngh_finder.find(pt.x, pt.y)
+            nghs = model.ngh_finder.find(self.pt.x, self.pt.y)
 
             if (self.has_cleaved_ngh(nghs) < 4):   
                 for ngh in nghs:
@@ -222,7 +235,7 @@ class Oligomer(core.Agent):
         self.name = oligomer_name
 
     def save(self) -> Tuple: 
-        return (self.uid, self.name)
+        return (self.uid, self.name, (self.pt.x, self.pt.y))
 
     def step(self):
         pass
@@ -231,11 +244,11 @@ class Oligomer(core.Agent):
 agent_cache = {}
 
 
-#restore 2 agents: enzyme and protein
+#restore agents: enzyme, protein, cleavedProtein and Oligomer
 def restore_agent(agent_data: Tuple):
     uid = agent_data[0]
-    #pt_tuple = agent_data[?]
-    #pt = dpt(*pt_tuple)
+    pt_tuple = agent_data[2]
+    pt = dpt(*pt_tuple)
 
     #uid: 0 id, 1 type, 2 rank
     if uid[1] == AEP.TYPE:
@@ -243,18 +256,41 @@ def restore_agent(agent_data: Tuple):
         if uid in agent_cache:
             agent = agent_cache[uid]
         else: 
-            agent = AEP(uid[0], uid[2])
+            agent = AEP(uid[0], uid[2], pt)
             agent_cache[uid] = agent
         
         agent.state = agent_data[1]
         return agent
     
-    else:
+    elif uid[1] == Protein.TYPE:
 
         if uid in agent_cache:
             agent = agent_cache[uid]
         else:
-            agent = Protein(uid[0], uid[2], agent_data[1])
+            name = agent_data[1]
+            agent = Protein(uid[0], uid[2], pt, name)
+            agent_cache[uid] = agent
+
+        return agent
+    
+    elif uid[1] == CleavedProtein.TYPE:
+
+        if uid in agent_cache:
+            agent = agent_cache[uid]
+        else:
+            name = agent_data[1]
+            agent = CleavedProtein(uid[0], uid[2], pt, name)
+            agent_cache[uid] = agent
+
+        return agent
+    
+    elif uid[1] == Oligomer.TYPE:
+
+        if uid in agent_cache:
+            agent = agent_cache[uid]
+        else:
+            name = agent_data[1]
+            agent = Oligomer(uid[0], uid[2], pt, name)
             agent_cache[uid] = agent
 
         return agent
@@ -268,12 +304,11 @@ class Model:
         self.runner = schedule.init_schedule_runner(comm)
         self.runner.schedule_repeating_event(1, 1, self.step)
         #self.runner.schedule_repeating_event(1, 2, self.step2)
-        #self.runner.schedule_repeating_event(1.1, 1, self.log_agents)
+        self.runner.schedule_repeating_event(1, 1, self.log_agents)
         #self.runner.schedule_stop(params['stop.at'])
         self.runner.schedule_stop(50)
         schedule.runner().schedule_end_event(self.at_end)
 
-        # TODO context
         self.comm = comm
         self.context = ctx.SharedContext(comm)
         self.rank = comm.Get_rank()
@@ -292,11 +327,39 @@ class Model:
 
         self.rng = repast4py.random.default_rng
 
-        self.added_agents_id = params['aep_enzyme'] + params['alpha_syn_proteins'] + params['tau_proteins']
-       
+        #parallel distribution of the agents
+        world_size = self.comm.Get_size()
+
+        #gets the total number of different type of agents in that process.
+        total_aep_count = params['aep_enzyme']
+        pp_aep_count = int(total_aep_count/world_size)
+        if self.rank < total_aep_count % world_size:
+            pp_aep_count += 1
+
+        total_tau_p_count = params['tau_proteins']
+        pp_tau_p_count = int(total_tau_p_count/world_size)
+        if self.rank < total_tau_p_count % world_size:
+            pp_tau_p_count += 1
+        
+        total_alpha_p_count = params['alpha_syn_proteins']
+        pp_alpha_p_count = int(total_alpha_p_count/world_size)
+        if self.rank < total_alpha_p_count % world_size:
+            pp_alpha_p_count += 1
+        
+        total_alpha_ol_count = params['alpha_syn_oligomers']
+        pp_alpha_ol_count = int(total_alpha_ol_count/world_size)
+        if self.rank < total_alpha_ol_count % world_size:
+            pp_alpha_ol_count += 1
+
+        total_tau_ol_count = params['tau_oligomers']
+        pp_tau_ol_count = int(total_tau_ol_count/world_size)
+        if self.rank < total_tau_ol_count % world_size:
+            pp_tau_ol_count += 1
+
+        self.added_agents_id = pp_aep_count + pp_alpha_p_count + pp_tau_p_count
 
         #add aep enzyme to the space
-        for j in range(params['aep_enzyme']):
+        for j in range(pp_aep_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
@@ -305,7 +368,7 @@ class Model:
             self.grid.move(aep_enzyme, pt)
 
         #add tau proteins to the space
-        for x in range(params['tau_proteins']):
+        for x in range(pp_tau_p_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
@@ -314,7 +377,7 @@ class Model:
             self.grid.move(tau_p, pt)
 
         #add alpha syn proteins to the space
-        for x in range(params['alpha_syn_proteins']):
+        for x in range(pp_alpha_p_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
@@ -323,7 +386,7 @@ class Model:
             self.grid.move(alpha_syn_p, pt)
         
         #add alpha syn oligomers to the space
-        for i in range(params['alpha_syn_oligomers']):
+        for i in range(pp_alpha_ol_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
@@ -333,7 +396,7 @@ class Model:
             self.added_agents_id += 1 
 
         #add tau oligomers to the space
-        for i in range(params['tau_oligomers']):
+        for i in range(pp_tau_ol_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
@@ -342,9 +405,9 @@ class Model:
             self.grid.move(tau_oligomer, pt)
             self.added_agents_id += 1 
 
-        # TODO log
-        #self.agent_logger = logging.TabularLogger(comm, params['agent_log_file'], ['tick', 'rank', 'number_of_healthy_neuron', 'number_of_damaged_neuron', 'number_of_dead_neuron', 'number_of_resting_microglia', 'number_of_active_microglia'])
-        #self.agent_log = Log()
+        # Da aggiungere: 'barrier_permeability', 'microbiota_good_bacteria_class', 'microbiota_pathogenic_bacteria_class', 'microbiota_diversity_threshold'
+        self.agent_logger = logging.TabularLogger(comm, params['agent_log_file'], ['tick', 'rank', 'aep_active', 'aep_hyperactive', 'alpha_protein', 'tau_protein', 'alpha_cleaved', 'tau_cleaved', 'alpha_oligomer', 'tau_oligomer'])
+        self.agent_log = Log()
         #self.log_agents()
 
     #the model remove the agent from the context
@@ -380,9 +443,7 @@ class Model:
         self.move(oligomer_protein, pt.x, pt.y)  
     
     def step(self):
-        #for agent in self.context.agents():
-        #    print("Agenti prima di ogni cosa: ", agent," , ", agent.TYPE)
-
+        print("Sono nello step")
         #makes the agents in the context execute their step.
         for agent in self.context.agents():
             if(type(agent) == AEP):
@@ -413,10 +474,7 @@ class Model:
             #print("agent: ", agent.uid)         
             self.add_cleaved_protein(protein_name)
             self.add_cleaved_protein(protein_name)
-
-
-        cleaved_protein_to_remove_size = len(all_true_cleaved_aggregates)
-        print("AllTrueArray: ", cleaved_protein_to_remove_size)        
+     
 
         #removes the cleaved protein that are not needed anymore
         for agent in all_true_cleaved_aggregates:
@@ -430,13 +488,11 @@ class Model:
                 else:
                     agent.nghs_cleaved = []
 
-    
         '''
-        PER STAMPARE
+        #PER STAMPARE
         print("STEP")
         for agent in self.context.agents():
             print("Agenti dopo di ogni cosa: ", agent," , ", agent.TYPE, ", posizione: ", agent.pt)    
-                  '''   
         
         cleaved_protein_count_alpha = 0
         cleaved_protein_count_tau = 0
@@ -463,11 +519,62 @@ class Model:
         print("cleaved proteine rimanenti alpha", cleaved_protein_count_alpha)  
         print("oligomeri creati tau", oligomer_count_tau)  
         print("oligomeri creati alpha", oligomer_count_alpha)              
-        
-        
-        self.context.synchronize(restore_agent)
+        '''
 
+        self.context.synchronize(restore_agent)
         tick = self.runner.schedule.tick
+
+    def log_agents(self):
+        tick = self.runner.schedule.tick
+
+        aep_active = 0
+        aep_hyperactive = 0
+        alpha_protein = 0
+        tau_protein = 0
+        alpha_cleaved = 0
+        tau_cleaved = 0
+        alpha_oligomer = 0
+        tau_oligomer = 0
+        #barrier_permeability = 0
+        #microbiota_good_bacteria_class = 0
+        #microbiota_pathogenic_bacteria_class = 0
+        #microbiota_diversity_threshold = 0
+
+
+        for agent in self.context.agents():
+            if(type(agent) == Oligomer):
+                if (agent.name == 1):
+                    alpha_oligomer += 1
+                else:
+                    tau_oligomer += 1
+            if(type(agent) == CleavedProtein):
+                if (agent.name == 1):
+                    alpha_cleaved += 1
+                else:
+                    tau_cleaved += 1
+            elif(type(agent) == Protein):
+                if (agent.name == 1):
+                    alpha_protein += 1
+                else:
+                    tau_protein += 1
+            elif(type(agent) == AEP):
+                if(agent.state == 0):
+                    aep_active += 1
+                else: 
+                    aep_hyperactive += 1
+        
+        self.agent_log.aep_active = aep_active
+        self.agent_log.aep_hyperactive = aep_hyperactive
+        self.agent_log.alpha_protein = alpha_protein
+        self.agent_log.tau_protein = tau_protein
+        self.agent_log.alpha_cleaved = alpha_cleaved
+        self.agent_log.tau_cleaved = tau_cleaved
+        self.agent_log.alpha_oligomer = alpha_oligomer
+        self.agent_log.tau_oligomer = tau_oligomer
+
+        #da aggiungere i quattro mancanti
+        self.agent_logger.log_row(tick, self.context.comm.Get_rank(), self.agent_log.aep_active, self.agent_log.aep_hyperactive, self.agent_log.alpha_protein, self.agent_log.tau_protein, self.agent_log.alpha_cleaved, self.agent_log.tau_cleaved, self.agent_log.alpha_oligomer, self.agent_log.tau_oligomer)
+        self.agent_logger.write()
     
     def at_end(self):
         self.agent_logger.close()
