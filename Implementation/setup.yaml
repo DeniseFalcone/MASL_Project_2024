@@ -3,19 +3,29 @@
 barrier_permeability : 100
 barrier_permeability_threshold : 50 
 
-microbiota_good_bacteria_class : 30000
+microbiota_good_bacteria_class : 300000
 microbiota_pathogenic_bacteria_class : 10000
 microbiota_diversity_threshold : 40000
 
 #to start the dysbyosis
-external_input : true
+external_input_number : 10
+external_input : {
+    diet : "diet",  #danneggia poco
+    antibiotics: "antibiotics", #daneggia parecchio
+    stress: "stress" #danneggiamento medio 
+}
 
 #the treatment to use
-treatment : true
+treatment : True
+
+treatment_input : {
+    diet: "diet", #cura di meno 
+    probiotics: "probiotics" #cura un pò di più
+}
 
 aep_enzyme : 20
-tau_proteins : 20
-alpha_syn_proteins : 20
+tau_proteins : 70
+alpha_syn_proteins : 70
 tau_oligomers : 0
 alpha_syn_oligomers : 0
 
@@ -25,8 +35,8 @@ protein_name : {
 }
 
 aep_state : {
-    active: 0,
-    hyperactive: 1
+    active: "active",
+    hyperactive: "hyperactive"
 }
 
 #nervous system variables
@@ -34,11 +44,11 @@ aep_state : {
 
 
 #model variables
-world.width: 10
-world.height: 10
+world.width: 20
+world.height: 20
 
 
-#seed : 42
-
+stop.at : 500
 agent_log_file: 'output/agent_log.csv'
+seed: 42
 
