@@ -1,14 +1,17 @@
 #gut system variables
 #valori da sistemare
-barrier_permeability : 100
+barrier_impermeability : 100
 barrier_permeability_threshold : 50 
+barrier_permeability_threshold_stop : 40
+barrier_permeability_threshold_start : 60
 
-microbiota_good_bacteria_class : 300000
+#letteratura???
+microbiota_good_bacteria_class : 30000
 microbiota_pathogenic_bacteria_class : 10000
-microbiota_diversity_threshold : 40000
+microbiota_diversity_threshold : 10000
 
 #to start the dysbyosis
-external_input_number : 10
+external_input_number : 50
 external_input : {
     diet : "diet",  #danneggia poco
     antibiotics: "antibiotics", #daneggia parecchio
@@ -16,7 +19,8 @@ external_input : {
 }
 
 #the treatment to use
-treatment : True
+treatment : False
+treatment_input_number : 0
 
 treatment_input : {
     diet: "diet", #cura di meno 
@@ -30,8 +34,8 @@ tau_oligomers : 0
 alpha_syn_oligomers : 0
 
 protein_name : {
-    tau: 0,
-    alpha_syn: 1
+    tau: "tau",
+    alpha_syn: "alpha"
 }
 
 aep_state : {

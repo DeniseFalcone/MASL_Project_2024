@@ -25,10 +25,9 @@ class Log:
     tau_cleaved: int = 0
     alpha_oligomer: int = 0
     tau_oligomer: int = 0
-    barrier_permeability : int = 0
+    barrier_impermeability : int = 0
     microbiota_good_bacteria_class : int = 0
     microbiota_pathogenic_bacteria_class : int = 0
-    microbiota_diversity_threshold : int = 0
 
 @numba.jit((int64[:], int64[:]), nopython=True)
 def is_equal(a1, a2):
@@ -93,9 +92,7 @@ class AEP(core.Agent):
             return True
 
     def step(self):
-        #gets the max 8 neighbours of the agent
-        if model.barrier_permeability < model.barrier_permeability_threshold and self.state == params["aep_state"]["active"]:
-            self.state = params["aep_state"]["hyperactive"]            
+        #gets the max 8 neighbours of the agent          
         nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
         dpt_array = self.percepts(nghs_coords)
         if type(dpt_array) == dpt:
@@ -238,7 +235,7 @@ class CleavedProtein(core.Agent):
             ngh_dpt = dpt(ngh_coords[0], ngh_coords[1])
             ngh = model.grid.get_agent(ngh_dpt)
             if (type(ngh) == CleavedProtein and self.name == ngh.name):
-                print("Vicino: ", ngh.uid)
+                #print("Vicino: ", ngh.uid)
                 #if ngh not in self.groupToAggregate:
                 if ngh.toAggregate == False and ngh.alreadyAggregate == False:
                     #self.groupToAggregate.append(ngh)
@@ -284,23 +281,54 @@ class ExternalInput(core.Agent):
 
     #if the external input is "diet" or "stress" then the microbiota bacteria decrease in good bacteria classes and increase in pathogenic ones.
     #otherwise it only decreases the good bacteria classes.
+    #random percentage to change the params of the microbiota
     def step(self):
-        if self.input_name == params["external_input"]["diet"]:
-            to_remove = int((model.microbiota_good_bacteria_class * 2)/100)
-            model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - to_remove
-            to_add = int((model.microbiota_pathogenic_bacteria_class * 5)/100)
-            model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class - to_add
-        elif self.input_name == params["external_input"]["antibiotics"]:
-            to_remove = int((model.microbiota_good_bacteria_class * 10)/100)
-            model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - to_remove
-        else:
-            value = int((model.microbiota_good_bacteria_class * 1)/100)
-            model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - value
-            to_add = int((model.microbiota_pathogenic_bacteria_class * 5)/100)
-            model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class - to_add
+        if model.barrier_impermeability >= model.barrier_permeability_threshold_stop:
+            if self.input_name == params["external_input"]["diet"]:
+                to_remove = int((model.microbiota_good_bacteria_class * np.random.uniform(0, 3))/100)
+                #while model.microbiota_good_bacteria_class - to_remove <= 0:
+                #    to_remove = to_remove/2
+                model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - to_remove
+                to_add = int((params["microbiota_pathogenic_bacteria_class"] * np.random.uniform(0, 3))/100)
+                model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class + to_add
+            elif self.input_name == params["external_input"]["antibiotics"]:
+                to_remove = int((model.microbiota_good_bacteria_class * np.random.uniform(0, 5))/100)
+                model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - to_remove
+                to_add = int((params["microbiota_pathogenic_bacteria_class"] * np.random.uniform(0, 2))/100)
+                model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class + to_add
+            else:
+                value = int((model.microbiota_good_bacteria_class * np.random.uniform(0, 3))/100)
+                model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class - value
+                value = int((params["microbiota_pathogenic_bacteria_class"] * np.random.uniform(0, 3))/100)
+                model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class + value
 
 
+class Treatment(core.Agent):
+    TYPE = 5
 
+    def __init__(self, local_id: int, rank: int, pt: dpt):
+        super().__init__(id=local_id, type=Treatment.TYPE, rank=rank)
+        self.pt = pt
+        possible_types = [params["treatment_input"]["diet"],params["treatment_input"]["probiotics"]]
+        random_index = np.random.randint(0, len(possible_types))
+        input_name = possible_types[random_index]
+        self.input_name = input_name
+
+    #if the external input is "diet" or "stress" then the microbiota bacteria decrease in good bacteria classes and increase in pathogenic ones.
+    #otherwise it only decreases the good bacteria classes.
+    #random percentage to change the params of the microbiota
+    def step(self):
+         if model.barrier_impermeability < model.barrier_permeability_threshold_start:
+            if self.input_name == params["treatment_input"]["diet"]:
+                to_add = int((params["microbiota_good_bacteria_class"] * np.random.uniform(0, 3))/100)
+                model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class + to_add
+                to_remove = int((model.microbiota_pathogenic_bacteria_class * np.random.uniform(0, 2))/100)
+                model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class - to_remove
+            elif self.input_name == params["treatment_input"]["probiotics"]:
+                to_add = int((params["microbiota_good_bacteria_class"] * np.random.uniform(0, 4))/100)
+                model.microbiota_good_bacteria_class = model.microbiota_good_bacteria_class + to_add
+                to_remove = int((model.microbiota_pathogenic_bacteria_class * np.random.uniform(0, 4))/100)
+                model.microbiota_pathogenic_bacteria_class = model.microbiota_pathogenic_bacteria_class - to_remove
 
 
 agent_cache = {}
@@ -373,7 +401,7 @@ class Model():
 
         self.runner = schedule.init_schedule_runner(comm)
         self.runner.schedule_repeating_event(1, 1, self.step)  
-        self.runner.schedule_repeating_event(1, 1, self.microbiota_dysbiosis_step) 
+        self.runner.schedule_repeating_event(1, 2, self.microbiota_dysbiosis_step) 
         self.runner.schedule_repeating_event(1, 5, self.move_cleaved_protein_step)     
         self.runner.schedule_stop(params['stop.at'])
         self.runner.schedule_end_event(self.at_end)
@@ -392,8 +420,9 @@ class Model():
         self.microbiota_good_bacteria_class = params["microbiota_good_bacteria_class"]
         self.microbiota_pathogenic_bacteria_class = params["microbiota_pathogenic_bacteria_class"]
         self.microbiota_diversity_threshold = params["microbiota_diversity_threshold"]
-        self.barrier_permeability = params["barrier_permeability"]
-        self.barrier_permeability_threshold = params["barrier_permeability_threshold"]
+        self.barrier_impermeability = params["barrier_impermeability"]
+        self.barrier_permeability_threshold_stop = params["barrier_permeability_threshold_stop"]
+        self.barrier_permeability_threshold_start = params["barrier_permeability_threshold_start"]
 
         #gets the total number of different type of agents in that process.
         total_aep_count = params['aep_enzyme']
@@ -426,7 +455,15 @@ class Model():
         if self.rank < total_ext_count % world_size:
             pp_ext_count += 1
 
-        self.added_agents_id = pp_aep_count + pp_alpha_p_count + pp_tau_p_count + pp_ext_count
+        if params['treatment'] == True:
+            total_treatment_count = params['treatment_input_number']
+            pp_treatment_count = int(total_treatment_count/world_size)
+            if self.rank < total_treatment_count % world_size:
+                pp_treatment_count += 1
+
+            self.added_agents_id = pp_aep_count + pp_alpha_p_count + pp_tau_p_count + pp_ext_count + pp_treatment_count
+        else:
+            self.added_agents_id = pp_aep_count + pp_alpha_p_count + pp_tau_p_count + pp_ext_count
 
         #print("Inizializzazione agenti processo ", self.rank, ": ")
         #add aep enzyme to the space
@@ -460,7 +497,7 @@ class Model():
             self.move(alpha_syn_p, pt)
             #print("Agent: ", alpha_syn_p, "Position: ", alpha_syn_p.pt)
 
-        #add tau proteins to the space
+        #add external input to the space
         for x in range(pp_ext_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
@@ -469,13 +506,22 @@ class Model():
             self.context.add(ext)
             self.move(ext, pt)
 
+        #add treatment input to the space
+        if params["treatment"] == True:
+            for x in range(pp_treatment_count):
+                pt = self.grid.get_random_local_pt(self.rng)
+                while(self.grid.get_agent(pt) is not None):
+                    pt = self.grid.get_random_local_pt(self.rng)
+                treatment = Treatment(x + params['aep_enzyme'] + params['tau_proteins'] + params['alpha_syn_proteins'] + params['external_input_number'], self.rank, pt)
+                self.context.add(treatment)
+                self.move(treatment, pt)
         
         #add alpha syn oligomers to the space
         for i in range(pp_alpha_ol_count):
             pt = self.grid.get_random_local_pt(self.rng)
             while(self.grid.get_agent(pt) is not None):
                 pt = self.grid.get_random_local_pt(self.rng)
-            alpha_syn_oligomer = Oligomer(i + params['aep_enzyme'] + params['tau_proteins'] + params['alpha_syn_proteins'] + params['external_input_number'], self.rank, pt, params["protein_name"]["alpha_syn"])
+            alpha_syn_oligomer = Oligomer(i + params['aep_enzyme'] + params['tau_proteins'] + params['alpha_syn_proteins'] + params['external_input_number'] + params['treatment_input_number'], self.rank, pt, params["protein_name"]["alpha_syn"])
             self.context.add(alpha_syn_oligomer)
             self.move(alpha_syn_oligomer, pt)
             self.added_agents_id += 1 
@@ -496,29 +542,46 @@ class Model():
     def move_cleaved_protein_step(self):
         for agent in self.context.agents():
             if type(agent) == CleavedProtein:
-                print("Cleaved protein con aggregate: ", agent.alreadyAggregate, " in pos: ", agent.pt)
+                #print("Cleaved protein con aggregate: ", agent.alreadyAggregate, " in pos: ", agent.pt)
                 if agent.alreadyAggregate == False:
                     pt = self.grid.get_random_local_pt(self.rng)
                     while(self.grid.get_agent(pt) is not None):
                         pt = self.grid.get_random_local_pt(self.rng)
                     self.move(agent, pt)
-                    print("Cleaved protein con aggregate: ", agent.alreadyAggregate, " in pos: ", agent.pt)
+                    #print("Cleaved protein con aggregate: ", agent.alreadyAggregate, " in pos: ", agent.pt)
 
+
+    #increase the dysbiosis in the system and, after a certain threshold, it starts to hyperactivate the AEP enzymes.
     def microbiota_dysbiosis_step(self):
         if self.microbiota_good_bacteria_class - self.microbiota_pathogenic_bacteria_class <= self.microbiota_diversity_threshold:
-            value_decrea = int((self.barrier_permeability*10)/100) 
-            self.barrier_permeability = self.barrier_permeability - value_decrea
-
+            value_decreased = int((params["barrier_impermeability"]*np.random.randint(0,6))/100) 
+            if self.barrier_impermeability - value_decreased <= 0:
+                self.barrier_impermeability = 0
+            else:
+                self.barrier_impermeability = self.barrier_impermeability - value_decreased
+            number_of_aep_to_hyperactivate = value_decreased
+            cont = 0
+            for agent in self.context.agents(agent_type=0):
+                if agent.state == params["aep_state"]["active"] and cont < number_of_aep_to_hyperactivate:
+                    agent.state = params["aep_state"]["hyperactive"]  
+                    cont += 1
+                elif cont == number_of_aep_to_hyperactivate:
+                    break
+        else:
+            if self.barrier_impermeability < params["barrier_impermeability"]:
+                value_increased = int((params["barrier_impermeability"]*np.random.randint(0,4))/100) 
+                if (self.barrier_impermeability + value_increased) <= params["barrier_impermeability"]:
+                    self.barrier_impermeability = self.barrier_impermeability + value_increased
 
     def step(self):
         #self.context.synchronize(restore_agent)
         print("Step in model")
         print("Process: ", self.rank)
-        print("Agents' Positions Before Step:")
-        for agent in self.context.agents():
-            print(f"Agent ({agent.uid}) at position ({agent.pt.x}, {agent.pt.y})")
-            if type(agent) == CleavedProtein:
-                print(f"Agent ({agent.uid}) con stati ToAggregate e AlreadyAggregate ({agent.toAggregate}, {agent.alreadyAggregate})")
+        #print("Agents' Positions Before Step:")
+        #for agent in self.context.agents():
+        #    print(f"Agent ({agent.uid}) at position ({agent.pt.x}, {agent.pt.y})")
+        #    if type(agent) == CleavedProtein:
+        #        print(f"Agent ({agent.uid}) con stati ToAggregate e AlreadyAggregate ({agent.toAggregate}, {agent.alreadyAggregate})")
         
         for agent in self.context.agents():
             agent.step()
@@ -531,7 +594,7 @@ class Model():
             if(type(agent) == Protein and agent.toCleave == True):
                 protein_to_remove.append(agent)
             elif(type(agent) == CleavedProtein and agent.toAggregate == True):
-                print("Cleaved: ", agent.uid, ", aggregate: ", agent.toAggregate, ", alreadyAggregate: ", agent.alreadyAggregate)
+                #print("Cleaved: ", agent.uid, ", aggregate: ", agent.toAggregate, ", alreadyAggregate: ", agent.alreadyAggregate)
                 all_true_cleaved_aggregates.append(agent)      
         #print("Elenco di tutte le cleaved da rimuovere: ", all_true_cleaved_aggregates)                
 
@@ -543,7 +606,6 @@ class Model():
             self.add_cleaved_protein(protein_name)
 
         #removes cleavedProteins
-        print("All true cleaved aggregates: ", all_true_cleaved_aggregates)
         for agent in all_true_cleaved_aggregates:
             if (self.context.agent(agent.uid) is not None and agent.toAggregate == True):
                 if agent.is_valid() == True:
@@ -634,6 +696,9 @@ class Model():
         self.counts.tau_cleaved = tau_cleaved
         self.counts.alpha_oligomer = alpha_oligomer
         self.counts.tau_oligomer = tau_oligomer
+        self.counts.microbiota_good_bacteria_class = self.microbiota_good_bacteria_class
+        self.counts.microbiota_pathogenic_bacteria_class = self.microbiota_pathogenic_bacteria_class
+        self.counts.barrier_impermeability = self.barrier_impermeability
         self.data_set.log(tick)
 
     def at_end(self):
@@ -652,13 +717,13 @@ def run(params: Dict):
 
 #execution function (when starting the program you have to pass the yaml file: setup.yaml)
 if __name__ == "__main__":
-    #parser = parameters.create_args_parser()
-    #args = parser.parse_args()
-    #params = parameters.init_params(args.parameters_file, args.parameters)
+    parser = parameters.create_args_parser()
+    args = parser.parse_args()
+    params = parameters.init_params(args.parameters_file, args.parameters)
     
     #for debug
-    stream = open("/home/chiaracintioni/Projects/MALezione1/PROJECT MASL/setup.yaml", "r")
-    params = yaml.load(stream)
-    params = params
+    #stream = open("/home/sakurahanami120/Projects/Multiagent/MASL_project/setup.yaml", "r")
+    #params = yaml.load(stream)
+    #params = params
 
     run(params)
