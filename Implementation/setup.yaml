@@ -1,9 +1,9 @@
 #gut system variables
-#valori da sistemare
-barrier_impermeability : 100
-barrier_permeability_threshold : 50 
-barrier_permeability_threshold_stop : 40
-barrier_permeability_threshold_start : 60
+#valori da sistemare (da dividere in base al numero di processi)
+barrier_impermeability : 50
+barrier_permeability_threshold : 25 
+barrier_permeability_threshold_stop : 20
+barrier_permeability_threshold_start : 30
 
 #letteratura???
 microbiota_good_bacteria_class : 30000
@@ -11,7 +11,7 @@ microbiota_pathogenic_bacteria_class : 10000
 microbiota_diversity_threshold : 10000
 
 #to start the dysbyosis
-external_input_number : 50
+external_input_number : 10
 external_input : {
     diet : "diet",  #danneggia poco
     antibiotics: "antibiotics", #daneggia parecchio
@@ -27,7 +27,7 @@ treatment_input : {
     probiotics: "probiotics" #cura un pò di più
 }
 
-aep_enzyme : 20
+aep_enzyme : 50
 tau_proteins : 70
 alpha_syn_proteins : 70
 tau_oligomers : 0
@@ -44,15 +44,37 @@ aep_state : {
 }
 
 #nervous system variables
+active_microglia.count: 0
+resting_microglia.count: 50
+neuron_healthy.count: 0
+neuron_damaged.count: 0
+neuron_dead.count: 0
+cytokine.count : 0
+alpha_syn_cleaved.count : 0
+alpha_syn_oligomer.count : 0
+tau_cleaved.count : 60
+tau_oligomer.count : 60
+
+microglia_state : {
+    active: "active",
+    resting: "resting"
+}
+
+neuron_state : {
+    "healthy": "healthy",
+    "damaged": "damaged",
+    "dead": "dead"
+}
 
 
 
 #model variables
-world.width: 20
-world.height: 20
+world.width: 50
+world.height: 50
 
 
-stop.at : 500
-agent_log_file: 'output/agent_log.csv'
+stop.at : 50
+gut_log_file: 'output/gut_log.csv'
+brain_log_file: 'output/brain_log.csv'
 seed: 42
 
