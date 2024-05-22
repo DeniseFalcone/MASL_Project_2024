@@ -2,30 +2,28 @@ from typing import Dict, Tuple
 from mpi4py import MPI
 import numpy as np
 from dataclasses import dataclass
-from repast4py import core, random, space, schedule, logging, parameters
+from repast4py import core, space, schedule, logging, parameters
 from repast4py import context as ctx
 import repast4py
 import repast4py.random
 from repast4py.space import DiscretePoint as dpt
-from repast4py.space import ContinuousPoint as cpt
-import yaml
 import numba
 from numba import int32, int64
 from numba.experimental import jitclass
-import math
 
 @dataclass
 class Log:
-    number_of_active_microglia: int = 0
     number_of_resting_microglia: int = 0
+    number_of_active_microglia: int = 0
     number_of_healthy_neuron: int = 0
     number_of_damaged_neuron: int = 0
     number_of_dead_neuron: int = 0
-    number_alpha_syn_oligomer: int = 0
     number_of_cleaved_alpha_syn: int = 0
-    number_tau_oligomer: int = 0
+    number_alpha_syn_oligomer: int = 0
     number_of_cleaved_tau: int = 0
-    number_of_cytokine: int = 0
+    number_tau_oligomer: int = 0
+    number_of_cytokine_pro_inflammatory: int = 0
+    number_of_cytokine_non_inflammatory: int = 0
 
 @numba.jit((int64[:], int64[:]), nopython=True)
 def is_equal(a1, a2):
@@ -64,17 +62,16 @@ class GridNghFinder:
         ys = ys[yd]
 
         # Remove the original (x, y) coordinate
-        mask = (xs != x) | (ys != y)
-        xs = xs[mask]
-        ys = ys[mask]
+        #mask = (xs != x) | (ys != y)
+        #xs = xs[mask]
+        #ys = ys[mask]
 
         return np.stack((xs, ys, np.zeros(len(ys), dtype=np.int32)), axis=-1)
     
-#class to create agent Microglia
+
 class Microglia(core.Agent):
 
     TYPE = 0
-    OFFSETS = np.array([-1, 1])
 
     # params["agent_state"]["resting"] state of an agent that is resting
     def __init__(self, local_id: int, rank: int, initial_state, pt):
@@ -93,17 +90,16 @@ class Microglia(core.Agent):
                 self.state = params["microglia_state"]["active"]
             else: 
                 ngh.toRemove = True
-
+            
     def check_oligomer_nghs(self, nghs_coords):
-        for ngh_coords in nghs_coords:
-            ngh_dpt = dpt(ngh_coords[0], ngh_coords[1])
-            ngh = model.grid.get_agent(ngh_dpt)
-            if (type(ngh) == Oligomer):
-                    return ngh
+        for ngh_coord in nghs_coords:
+            ngh_array = model.grid.get_agents(dpt(ngh_coord[0], ngh_coord[1]))
+            for ngh in ngh_array:
+                if (type(ngh) == Oligomer):
+                        return ngh
         return None
 
 
-#class to create Neurons
 class Neuron(core.Agent): 
 
     TYPE = 1
@@ -112,29 +108,93 @@ class Neuron(core.Agent):
         super().__init__(id=local_id, type=Neuron.TYPE, rank=rank)
         self.state = initial_state
         self.pt = pt
+        self.toRemove = False
 
     def save(self) -> Tuple:
-        return (self.uid, self.state, self.pt.coordinates)
+        return (self.uid, self.state, self.pt.coordinates, self.toRemove)
     
     def step(self): 
-        pass
-
+        difference_pro_anti_cytokine = model.pro_cytokine - model.anti_cytokine
+        if difference_pro_anti_cytokine > 0: 
+            level_of_inflammation = (difference_pro_anti_cytokine * 100)/(model.pro_cytokine + model.anti_cytokine)
+            if np.random.randint(0,100) < level_of_inflammation: 
+                self.change_state()
+        else:
+            pass
+    
+    def change_state(self):
+        if self.state == params["neuron_state"]["healthy"]:
+            self.state = params["neuron_state"]["damaged"]
+        elif self.state == params["neuron_state"]["damaged"]:
+            self.state = params["neuron_state"]["dead"]
+            self.toRemove = True
+            model.dead_neuron += 1
+    
 
 class CleavedProtein(core.Agent): 
 
     TYPE = 2
 
-    def __init__(self, local_id: int, rank: int, name, pt):
+    def __init__(self, local_id: int, rank: int, name, pt: dpt):
         super().__init__(id=local_id, type=CleavedProtein.TYPE, rank=rank)
         self.name = name
         self.pt = pt
+        self.alreadyAggregate = False
+        self.toRemove = False
+        self.toAggregate = False
 
     def save(self) -> Tuple:
-        return (self.uid, self.name, self.pt.coordinates)
+        return (self.uid, self.name, self.pt.coordinates, self.toAggregate, self.alreadyAggregate, self.toRemove)
+
+    def step(self):
+        if self.alreadyAggregate == True or self.toAggregate == True or self.pt is None:
+            pass
+        else:
+            cleaved_nghs_number, _, nghs_coords = self.check_and_get_nghs()
+            if cleaved_nghs_number == 0:
+                random_index = np.random.randint(0, len(nghs_coords))
+                model.move(self, nghs_coords[random_index])
+            elif cleaved_nghs_number >= 4:               
+                self.change_state()
+            else:
+                self.change_group_aggregate_status()
+                
+    def change_group_aggregate_status(self):
+        nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
+        for ngh_coords in nghs_coords:
+            nghs_array = model.grid.get_agents(dpt(ngh_coords[0], ngh_coords[1]))
+            for ngh in nghs_array:
+                if ngh is not None:
+                    ngh.alreadyAggregate = False
+
+    def is_valid(self):
+        cont = 0
+        _, nghs_cleaved, _ = self.check_and_get_nghs()
+        for agent in nghs_cleaved:
+            if (agent.alreadyAggregate == True):
+                cont += 1
+        if cont >= 4:
+            return True
+        else: 
+            return False
     
-    def step(self): 
-        #TODO
-        pass
+    def change_state(self):
+        if self.toAggregate == False:
+            self.toAggregate = True
+    
+    def check_and_get_nghs(self):
+        nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
+        cont = 0
+        cleavedProteins = []
+        for ngh_coords in nghs_coords:
+            ngh_array = model.grid.get_agents(dpt(ngh_coords[0], ngh_coords[1]))
+            for ngh in ngh_array:
+                if (type(ngh) == CleavedProtein and self.name == ngh.name):
+                    cleavedProteins.append(ngh)
+                    if ngh.toAggregate == False and ngh.alreadyAggregate == False:
+                        ngh.alreadyAggregate = True
+                        cont += 1
+        return cont, cleavedProteins, nghs_coords
 
 
 class Oligomer(core.Agent): 
@@ -151,8 +211,13 @@ class Oligomer(core.Agent):
         return (self.uid, self.name, self.pt.coordinates, self.toRemove)
     
     def step(self): 
-        #TODO
-        pass
+        if self.pt is None:
+            return
+        else: 
+            nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
+            random_index = np.random.randint(0, len(nghs_coords))
+            chosen_dpt = dpt(nghs_coords[random_index][0], nghs_coords[random_index][1])
+            model.move(self, chosen_dpt)
 
 
 class Cytokine(core.Agent): 
@@ -162,24 +227,51 @@ class Cytokine(core.Agent):
     def __init__(self, local_id: int, rank: int, pt):
         super().__init__(id=local_id, type=Cytokine.TYPE, rank=rank)
         self.pt = pt
+        possible_types = [params["cyto_state"]["pro_inflammatory"],params["cyto_state"]["non_inflammatory"]]
+        random_index = np.random.randint(0, len(possible_types))
+        self.state = possible_types[random_index]
+        if self.state == params["cyto_state"]["pro_inflammatory"]:
+            model.pro_cytokine += 1
+        else: 
+            model.anti_cytokine += 1
 
     def save(self) -> Tuple:
-        return (self.uid, self.pt.coordinates)
+        return (self.uid, self.state, self.pt.coordinates)
     
     def step(self): 
-        #TODO
-        #percepisce la microglia a riposo e la attiva
-        pass
+        if self.pt is None:
+            return
+        microglie_nghs, nghs_coords = self.get_microglie_nghs()
+        if len(microglie_nghs) == 0:
+            random_index = np.random.randint(0, len(nghs_coords))
+            model.move(self, dpt(nghs_coords[random_index][0], nghs_coords[random_index][1]))
+        else:               
+            ngh_microglia = microglie_nghs[0]
+            if self.state == params["cyto_state"]["pro_inflammatory"] and ngh_microglia.state == params["microglia_state"]["resting"]:
+                ngh_microglia.state = params["microglia_state"]["active"]
+            elif self.state == params["cyto_state"]["non_inflammatory"] and ngh_microglia.state == params["microglia_state"]["active"]:
+                ngh_microglia.state = params["microglia_state"]["resting"]
 
+    def get_microglie_nghs(self):
+        nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
+        microglie = []
+        for ngh_coords in nghs_coords:
+            nghs_array = model.grid.get_agents(dpt(ngh_coords[0], ngh_coords[1]))
+            for ngh in nghs_array:
+                if (type(ngh) == Microglia):
+                    microglie.append(ngh)
+        return microglie, nghs_coords
+        
 
 agent_cache= {}
 
+
 def restore_agent(agent_data: Tuple):
     uid = agent_data[0]
-
+    pt_array = agent_data[2]
+    pt = dpt(pt_array[0], pt_array[1], 0)
     if uid[1] == Microglia.TYPE:
         agent_state = agent_data[1]
-        pt = agent_data[2]
         if uid in agent_cache:
             agent = agent_cache[uid]
         else:
@@ -189,27 +281,28 @@ def restore_agent(agent_data: Tuple):
         agent.pt = pt
     elif uid[1] == Neuron.TYPE:
         agent_state = agent_data[1]
-        pt = agent_data[2]
         if uid in agent_cache:
             agent = agent_cache[uid]
         else:
             agent = Neuron(uid[0], uid[2], agent_state, pt)
             agent_cache[uid] = agent
         agent.state = agent_state
+        agent.toRemove = agent_data[3]
         agent.pt = pt
     elif uid[1] == CleavedProtein.TYPE:
         agent_name = agent_data[1]
-        pt = agent_data[2]
         if uid in agent_cache:
             agent = agent_cache[uid]
         else:
             agent = CleavedProtein(uid[0], uid[2], agent_name, pt)
             agent_cache[uid] = agent
         agent.name = agent_name
+        agent.toAggregate = agent_data[3]
+        agent.alreadyAggregate = agent_data[4]
+        agent.toRemove = agent_data[5]
         agent.pt = pt
     elif uid[1] == Oligomer.TYPE:
         agent_name = agent_data[1]
-        pt = agent_data[2]
         toRemove = agent_data[3]
         if uid in agent_cache:
             agent = agent_cache[uid]
@@ -220,14 +313,13 @@ def restore_agent(agent_data: Tuple):
         agent.pt = pt
         agent.toRemove = toRemove
     elif uid[1] == Cytokine.TYPE:
-        pt = agent_data[1]
         if uid in agent_cache:
             agent = agent_cache[uid]
         else:
             agent = Cytokine(uid[0], uid[2], pt)
             agent_cache[uid] = agent
         agent.pt = pt
-    
+        agent.state = agent_data[1]
     return agent
 
 class Model:
@@ -236,14 +328,15 @@ class Model:
         self.context = ctx.SharedContext(comm)
         self.rank = comm.Get_rank()
 
-        box = space.BoundingBox(0,params['world.width']-1, 0, params['world.height']-1,0,0)
-        self.grid = space.SharedGrid(name='grid', bounds=box, borders=space.BorderType.Sticky, occupancy=space.OccupancyType.Single,
-                                     buffer_size=1, comm=comm)
-        self.context.add_projection(self.grid)    
-        self.ngh_finder = GridNghFinder(0,0,box.xextent,box.yextent)
+        self.box = space.BoundingBox(0, params['world.width']-1, 0, params['world.height']-1, 0, 0)
+        self.grid = space.SharedGrid(name='grid', bounds=self.box, borders=space.BorderType.Sticky,
+                                    occupancy=space.OccupancyType.Multiple, buffer_size=1, comm=comm)
+        self.context.add_projection(self.grid)
+        self.ngh_finder = GridNghFinder(0, 0, self.box.xextent, self.box.yextent)
 
         self.runner = schedule.init_schedule_runner(comm)
-        self.runner.schedule_repeating_event(1, 1, self.step)    
+        self.runner.schedule_repeating_event(1, 1, self.step, priority_type=0)
+        self.runner.schedule_repeating_event(1, 1, self.check_nervous_system_death, priority_type=1)
         self.runner.schedule_stop(params['stop.at'])
         self.runner.schedule_end_event(self.at_end)
 
@@ -254,163 +347,139 @@ class Model:
         loggers = logging.create_loggers(self.counts, op=MPI.SUM, rank=self.rank)
         self.data_set = logging.ReducingDataSet(loggers, self.comm, params['brain_log_file'], buffer_size=1)
 
-        #parallel distribution of the agents
-        world_size = self.comm.Get_size()
+        self.world_size = self.comm.Get_size()
+        self.added_agents_id = 0
 
-        total_h_neuron_count = params['neuron_healthy.count']
-        pp_h_neuron_count = int(total_h_neuron_count/world_size)
-        if self.rank < total_h_neuron_count % world_size:
-            pp_h_neuron_count += 1
+        agent_types = [
+            ('neuron_healthy.count', Neuron, 'healthy'),
+            ('neuron_damaged.count', Neuron, 'damaged'),
+            ('neuron_dead.count', Neuron, 'dead'),
+            ('resting_microglia.count', Microglia, 'resting'),
+            ('active_microglia.count', Microglia, 'active'),
+            ('alpha_syn_cleaved.count', CleavedProtein, 'alpha_syn'),
+            ('tau_cleaved.count', CleavedProtein, 'tau'),
+            ('alpha_syn_oligomer.count', Oligomer, 'alpha_syn'),
+            ('tau_oligomer.count', Oligomer, 'tau'),
+            ('cytokine.count', Cytokine, None)
+        ]
 
-        total_dam_neuron_count = params['neuron_damaged.count']
-        pp_dam_neuron_count = int(total_dam_neuron_count/world_size)
-        if self.rank < total_dam_neuron_count % world_size:
-            pp_dam_neuron_count += 1
+        for agent_type in agent_types:
+            total_count = params[agent_type[0]]
+            pp_count = self.calculate_partitioned_count(total_count)
+            self.create_agents(agent_type[1], pp_count, agent_type[2], params)
 
-        total_dead_neuron_count = params['neuron_dead.count']
-        pp_dead_neuron_count = int(total_dead_neuron_count/world_size)
-        if self.rank < total_dead_neuron_count % world_size:
-            pp_dead_neuron_count += 1
+        self.pro_cytokine = 0
+        self.anti_cytokine = 0
+        self.dead_neuron = self.calculate_partitioned_count(params['neuron_dead.count'])
+
+    def calculate_partitioned_count(self, total_count):
+        pp_count = total_count // self.world_size
+        if self.rank < total_count % self.world_size:
+            pp_count += 1
+        return pp_count
+
+    def create_agents(self, agent_class, pp_count, state_key, params):
+        for j in range(pp_count):
+            pt = self.grid.get_random_local_pt(self.rng)
+            if agent_class == Neuron or agent_class == Microglia:
+                agent = agent_class(self.added_agents_id + j, self.rank, params[f"{agent_class.__name__.lower()}_state"][state_key], pt)
+            elif agent_class == CleavedProtein or agent_class == Oligomer:
+                agent = agent_class(self.added_agents_id + j, self.rank, params["protein_name"][state_key], pt)
+            else: #for cytokine
+                agent = agent_class(self.added_agents_id + j, self.rank, pt)
+            self.context.add(agent)
+            self.move(agent, pt)
+        self.added_agents_id += pp_count
+   
+    def check_nervous_system_death(self):
+        non_dead_neurons_count = 0
+        for agent in self.context.agents():
+            if isinstance(agent, Neuron) and (agent.state == params["neuron_state"]["healthy"] or agent.state == params["neuron_state"]["damaged"]):
+                non_dead_neurons_count += 1
         
-        total_rest_microglia_count = params['resting_microglia.count']
-        pp_rest_microglia_count = int(total_rest_microglia_count/world_size)
-        if self.rank < total_rest_microglia_count % world_size:
-            pp_rest_microglia_count += 1
-
-        total_active_microglia_count = params['active_microglia.count']
-        pp_active_microglia_count = int(total_active_microglia_count/world_size)
-        if self.rank < total_active_microglia_count % world_size:
-            pp_active_microglia_count += 1
-        
-        total_alpha_cleaved_count = params['alpha_syn_cleaved.count']
-        pp_alpha_cleaved_count = int(total_alpha_cleaved_count/world_size)
-        if self.rank < total_alpha_cleaved_count % world_size:
-            pp_alpha_cleaved_count += 1
-
-        total_tau_cleaved_count = params['tau_cleaved.count']
-        pp_tau_cleaved_count = int(total_tau_cleaved_count/world_size)
-        if self.rank < total_tau_cleaved_count % world_size:
-            pp_tau_cleaved_count += 1
-
-        total_alpha_oligomer_count = params['alpha_syn_oligomer.count']
-        pp_alpha_oligomer_count = int(total_alpha_oligomer_count/world_size)
-        if self.rank < total_alpha_oligomer_count % world_size:
-            pp_alpha_oligomer_count += 1
-
-        total_tau_oligomer_count = params['tau_oligomer.count']
-        pp_tau_oligomer_count = int(total_tau_oligomer_count/world_size)
-        if self.rank < total_tau_oligomer_count % world_size:
-            pp_tau_oligomer_count += 1
-        
-        total_cytokine_count = params['cytokine.count']
-        pp_cytokine_count = int(total_cytokine_count/world_size)
-        if self.rank < total_cytokine_count % world_size:
-            pp_cytokine_count += 1
-
-        self.added_agents_id = pp_h_neuron_count + pp_tau_oligomer_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + pp_alpha_cleaved_count + pp_tau_cleaved_count + pp_alpha_oligomer_count + pp_cytokine_count
-
-        rng = repast4py.random.default_rng
-        for j in range(pp_h_neuron_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            h_neuron = Neuron(j,self.rank,params["neuron_state"]["healthy"], pt)
-            self.context.add(h_neuron)
-            self.move(h_neuron, pt)
-        for j in range(pp_dam_neuron_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            dam_neuron = Neuron(pp_h_neuron_count + j,self.rank,params["neuron_state"]["damaged"], pt)
-            self.context.add(dam_neuron)
-            self.move(dam_neuron, pt)
-        for j in range(pp_dead_neuron_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            dead_neuron = Neuron(pp_h_neuron_count + pp_dam_neuron_count + j,self.rank,params["neuron_state"]["dead"], pt)
-            self.context.add(dead_neuron)
-            self.move(dead_neuron, pt)
-        for j in range(pp_rest_microglia_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            rest_microglia = Microglia(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + j,self.rank,params["microglia_state"]["resting"], pt)
-            self.context.add(rest_microglia)
-            self.move(rest_microglia, pt)
-        for j in range(pp_active_microglia_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            active_microglia = Microglia(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + j,self.rank,params["microglia_state"]["active"], pt)
-            self.context.add(active_microglia)
-            self.move(active_microglia, pt)
-        for j in range(pp_alpha_cleaved_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            alpha_cleaved = CleavedProtein(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + j,self.rank,params["protein_name"]["alpha_syn"], pt)
-            self.context.add(alpha_cleaved)
-            self.move(alpha_cleaved, pt)
-        for j in range(pp_tau_cleaved_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            tau_cleaved = CleavedProtein(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + pp_alpha_cleaved_count + j,self.rank,params["protein_name"]["tau"], pt)
-            self.context.add(tau_cleaved)
-            self.move(tau_cleaved, pt)
-        for j in range(pp_alpha_oligomer_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            alpha_oligomer = Oligomer(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + pp_alpha_cleaved_count + pp_tau_cleaved_count + j,self.rank,params["protein_name"]["alpha_syn"], pt)
-            self.context.add(alpha_oligomer)
-            self.move(alpha_oligomer, pt)
-        for j in range(pp_tau_oligomer_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            tau_oligomer = Oligomer(pp_h_neuron_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + pp_alpha_cleaved_count + pp_tau_cleaved_count + pp_alpha_oligomer_count + j,self.rank,params["protein_name"]["tau"], pt)
-            self.context.add(tau_oligomer)
-            self.move(tau_oligomer, pt)
-        for j in range(pp_cytokine_count):
-            pt = self.grid.get_random_local_pt(rng)
-            while(self.grid.get_agent(pt) is not None):
-                pt = self.grid.get_random_local_pt(self.rng)
-            cytokine = Cytokine(pp_h_neuron_count + pp_tau_oligomer_count + pp_dam_neuron_count + pp_dead_neuron_count + pp_rest_microglia_count + pp_active_microglia_count + pp_alpha_cleaved_count + pp_tau_cleaved_count + pp_alpha_oligomer_count + j,self.rank, pt)
-            self.context.add(cytokine)
-            self.move(cytokine, pt)
+        if non_dead_neurons_count == 0:
+            print("There are no more alive neurons, ending the simulation.")
+            self.comm.Abort()
 
     def step(self):
-        #considerare rimuovere neuroni
-        #considerare citochine anti infiammatorie
-
         self.context.synchronize(restore_agent)
         self.log_counts()
 
+        def gather_agents_to_remove():
+            return [agent for agent in self.context.agents() if isinstance(agent, (Oligomer, CleavedProtein, Neuron)) and agent.toRemove]
+
+        # Remove agents marked for removal
+        remove_agents = gather_agents_to_remove()
+        removed_ids = set()
+        for agent in remove_agents:
+            if self.context.agent(agent.uid) is not None:
+                self.remove_agent(agent)
+                removed_ids.add(agent.uid)
+
+        self.context.synchronize(restore_agent)
+
+        # Let each agent perform its step
         for agent in self.context.agents():
             agent.step()
 
+        # Collect data and perform operations based on agent states
         oligomer_to_remove = []
         active_microglia = 0
         damaged_neuron = 0
+        all_true_cleaved_aggregates = []
 
         for agent in self.context.agents():
-            if (type(agent) == Oligomer and agent.toRemove == True):
+            if isinstance(agent, Oligomer) and agent.toRemove:
                 oligomer_to_remove.append(agent)
-            elif (type(agent) == Microglia and agent.state == params["microglia_state"]["active"]):
+            elif isinstance(agent, Microglia) and agent.state == params["microglia_state"]["active"]:
                 active_microglia += 1
-            elif (type(agent) == Neuron and agent.state == params["neuron_state"]["damaged"]):
+            elif isinstance(agent, Neuron) and agent.state == params["neuron_state"]["damaged"]:
                 damaged_neuron += 1
-        
-        for i in range(active_microglia):
-            self.add_cytokine()
-            
-        for i in range(damaged_neuron):
-            self.add_cleaved_protein()
+            elif isinstance(agent, CleavedProtein) and agent.toAggregate:
+                all_true_cleaved_aggregates.append(agent)
+                agent.toRemove = True
 
+        for _ in range(active_microglia):
+            self.add_cytokine()
+        for _ in range(damaged_neuron):
+            self.add_cleaved_protein()
         for oligomer in oligomer_to_remove:
-            self.remove_agent(oligomer)
+            if self.context.agent(oligomer.uid) is not None:
+                self.remove_agent(oligomer)
+                removed_ids.add(oligomer.uid)
+
+        self.context.synchronize(restore_agent)
+
+        for agent in all_true_cleaved_aggregates:
+            if agent.uid in removed_ids:
+                continue
+            if agent.toAggregate and agent.is_valid():
+                cont = 0
+                _, agent_nghs_cleaved, _ = agent.check_and_get_nghs()
+                for x in agent_nghs_cleaved:
+                    if x.alreadyAggregate and x.uid != agent.uid:
+                        if cont < 3:
+                            if self.context.agent(x.uid) is not None:
+                                self.remove_agent(x)
+                                removed_ids.add(x.uid)
+                            cont += 1
+                        else:
+                            x.alreadyAggregate = False
+                            x.toAggregate = False
+                            cont += 1
+                self.add_oligomer_protein(agent.name)
+                self.remove_agent(agent)
+                removed_ids.add(agent.uid)
+
+        self.context.synchronize(restore_agent)
+
+        # Remove agents marked for removal after all processing
+        remove_agents = gather_agents_to_remove()
+        for agent in remove_agents:
+            if agent.uid not in removed_ids:
+                if self.context.agent(agent.uid) is not None:
+                    self.remove_agent(agent)
+                    removed_ids.add(agent.uid)
 
     def remove_agent(self, agent):
         self.context.remove(agent)
@@ -421,17 +490,20 @@ class Model:
         random_index = np.random.randint(0, len(possible_types))
         cleaved_protein_name = possible_types[random_index]
         pt = self.grid.get_random_local_pt(self.rng)
-        while(self.grid.get_agent(pt) is not None):
-            pt = self.grid.get_random_local_pt(self.rng)  
         cleaved_protein = CleavedProtein(self.added_agents_id, self.rank, cleaved_protein_name, pt)   
         self.context.add(cleaved_protein)   
         self.move(cleaved_protein, cleaved_protein.pt)
 
+    def add_oligomer_protein(self, oligomer_name):
+        self.added_agents_id += 1 
+        pt = self.grid.get_random_local_pt(self.rng) 
+        oligomer_protein = Oligomer(self.added_agents_id, self.rank, oligomer_name, pt)
+        self.context.add(oligomer_protein)        
+        self.move(oligomer_protein, oligomer_protein.pt)      
+
     def add_cytokine(self):
         self.added_agents_id += 1
         pt = self.grid.get_random_local_pt(self.rng)
-        while(self.grid.get_agent(pt) is not None):
-            pt = self.grid.get_random_local_pt(self.rng)  
         cytokine= Cytokine(self.added_agents_id, self.rank, pt)   
         self.context.add(cytokine)   
         self.move(cytokine, cytokine.pt)
@@ -443,56 +515,53 @@ class Model:
     def log_counts(self):
         tick = self.runner.schedule.tick
 
-        #se rimuoviamo neuroni morti, salvare il quantitativo in una variabile in model: self.deadNeuron che fa da contatore
+        counts = {
+            "microglia_resting": 0,
+            "microglia_active": 0,
+            "neuron_healthy": 0,
+            "neuron_damaged": 0,
+            "alpha_cleaved": 0,
+            "tau_cleaved": 0,
+            "alpha_oligomer": 0,
+            "tau_oligomer": 0
+        }
 
-        microglia_resting = 0
-        microglia_active = 0
-        neuron_healthy = 0
-        neuron_damaged = 0
-        neuron_dead = 0
-        cytokine = 0
-        alpha_cleaved = 0
-        tau_cleaved = 0
-        alpha_oligomer = 0
-        tau_oligomer = 0
+        for agent in self.context.agents():
+            if isinstance(agent, Oligomer):
+                if agent.name == params["protein_name"]["alpha_syn"]:
+                    counts["alpha_oligomer"] += 1
+                else:
+                    counts["tau_oligomer"] += 1
+            elif isinstance(agent, CleavedProtein):
+                if agent.name == params["protein_name"]["alpha_syn"]:
+                    counts["alpha_cleaved"] += 1
+                else:
+                    counts["tau_cleaved"] += 1
+            elif isinstance(agent, Neuron):
+                if agent.state == params["neuron_state"]["healthy"]:
+                    counts["neuron_healthy"] += 1
+                elif agent.state == params["neuron_state"]["damaged"]:
+                    counts["neuron_damaged"] += 1
+            elif isinstance(agent, Microglia):
+                if agent.state == params["microglia_state"]["active"]:
+                    counts["microglia_active"] += 1
+                else:
+                    counts["microglia_resting"] += 1
 
-        for agent in self.context.agents(): 
-            if(type(agent) == Oligomer): 
-                if (agent.name == params["protein_name"]["alpha_syn"]): 
-                    alpha_oligomer += 1 
-                else: 
-                    tau_oligomer += 1 
-            if(type(agent) == CleavedProtein): 
-                if (agent.name == params["protein_name"]["alpha_syn"]): 
-                    alpha_cleaved += 1 
-                else: 
-                    tau_cleaved += 1 
-            elif(type(agent) == Neuron): 
-                if (agent.state == params["neuron_state"]["healthy"]): 
-                    neuron_healthy += 1 
-                elif (agent.state == params["neuron_state"]["damaged"]):
-                    neuron_damaged += 1
-                else: 
-                    neuron_dead += 1
-            elif(type(agent) == Microglia): 
-                if(agent.state == params["microglia_state"]["active"]): 
-                    microglia_active += 1 
-                else:  
-                    microglia_resting += 1
-            elif(type(agent) == Cytokine):
-                cytokine += 1
-        
-        self.counts.number_of_healthy_neuron = neuron_healthy
-        self.counts.number_of_damaged_neuron = neuron_damaged
-        self.counts.number_of_dead_neuron = neuron_dead
-        self.counts.number_of_cytokine = cytokine
-        self.counts.number_of_cleaved_alpha_syn = alpha_cleaved
-        self.counts.number_of_cleaved_tau = tau_cleaved
-        self.counts.number_alpha_syn_oligomer = alpha_oligomer
-        self.counts.number_tau_oligomer = tau_oligomer
-        self.counts.number_of_resting_microglia = microglia_resting
-        self.counts.number_of_active_microglia = microglia_active
+        self.counts.number_of_healthy_neuron = counts["neuron_healthy"]
+        self.counts.number_of_damaged_neuron = counts["neuron_damaged"]
+        self.counts.number_of_dead_neuron = self.dead_neuron
+        self.counts.number_of_cytokine_pro_inflammatory = self.pro_cytokine
+        self.counts.number_of_cytokine_non_inflammatory = self.anti_cytokine
+        self.counts.number_of_cleaved_alpha_syn = counts["alpha_cleaved"]
+        self.counts.number_of_cleaved_tau = counts["tau_cleaved"]
+        self.counts.number_alpha_syn_oligomer = counts["alpha_oligomer"]
+        self.counts.number_tau_oligomer = counts["tau_oligomer"]
+        self.counts.number_of_resting_microglia = counts["microglia_resting"]
+        self.counts.number_of_active_microglia = counts["microglia_active"]
+
         self.data_set.log(tick)
+
 
     def at_end(self):
         self.data_set.close()
@@ -500,23 +569,15 @@ class Model:
     def start(self):
         self.runner.execute()
 
-
-#run function
 def run(params: Dict):
     global model
     model = Model(MPI.COMM_WORLD, params)
     model.start()
 
-#execution function (when starting the program you have to pass the yaml file: setup.yaml)
 if __name__ == "__main__":
     parser = parameters.create_args_parser()
     args = parser.parse_args()
     params = parameters.init_params(args.parameters_file, args.parameters)
-    
-    #for debug
-    #stream = open("/home/sakurahanami120/Projects/Multiagent/MASL_project/setup.yaml", "r")
-    #params = yaml.load(stream)
-    #params = params
 
     run(params)
 

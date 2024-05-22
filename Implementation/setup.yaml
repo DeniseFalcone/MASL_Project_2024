@@ -19,8 +19,8 @@ external_input : {
 }
 
 #the treatment to use
-treatment : False
-treatment_input_number : 0
+treatment : True
+treatment_input_number : 10
 
 treatment_input : {
     diet: "diet", #cura di meno 
@@ -28,8 +28,8 @@ treatment_input : {
 }
 
 aep_enzyme : 50
-tau_proteins : 70
-alpha_syn_proteins : 70
+tau_proteins : 300
+alpha_syn_proteins : 300
 tau_oligomers : 0
 alpha_syn_oligomers : 0
 
@@ -46,14 +46,14 @@ aep_state : {
 #nervous system variables
 active_microglia.count: 0
 resting_microglia.count: 50
-neuron_healthy.count: 0
-neuron_damaged.count: 0
+neuron_healthy.count: 300
+neuron_damaged.count: 100
 neuron_dead.count: 0
 cytokine.count : 0
-alpha_syn_cleaved.count : 0
+alpha_syn_cleaved.count : 100
 alpha_syn_oligomer.count : 0
-tau_cleaved.count : 60
-tau_oligomer.count : 60
+tau_cleaved.count : 100
+tau_oligomer.count : 0
 
 microglia_state : {
     active: "active",
@@ -66,14 +66,17 @@ neuron_state : {
     "dead": "dead"
 }
 
-
+cyto_state : {
+    pro_inflammatory: "pro_inflammatory",
+    non_inflammatory: "non_inflammatory"
+}
 
 #model variables
-world.width: 50
-world.height: 50
+world.width: 100
+world.height: 100
 
 
-stop.at : 50
+stop.at : 1000
 gut_log_file: 'output/gut_log.csv'
 brain_log_file: 'output/brain_log.csv'
 seed: 42
