@@ -8,8 +8,256 @@ import repast4py
 import repast4py.random
 from repast4py.space import DiscretePoint as dpt
 import numba
+import math
 from numba import int32, int64
 from numba.experimental import jitclass
+import pygame
+
+class GUI:
+    def __init__(self, width, height, gut_context, brain_context, grid_dimensions=(100, 100)):
+        self.background_color = (202, 187, 185) 
+        self.border_color = (255, 255, 255) 
+        self.width = width
+        self.height = height
+        self.screen = pygame.display.set_mode((self.width, self.height))
+        pygame.display.set_caption("Simulation")
+        self.font = pygame.font.Font(None, 36)
+        self.running = True
+        self.gut_context = gut_context
+        self.brain_context = brain_context
+        self.grid_width, self.grid_height = grid_dimensions
+        self.paused = False
+        self.button_rects = []
+
+    def update(self):
+        # Fill the background color
+        self.screen.fill((200, 200, 200))
+
+        # Draw sections "Gut Environment" and "Brain Environment"
+        gut_text = self.font.render("Gut Environment", True, (0, 0, 0))
+        brain_text = self.font.render("Brain Environment", True, (0, 0, 0))
+
+        text_y_position = 50
+        
+        self.screen.blit(gut_text, (self.width // 4 - gut_text.get_width() // 2, text_y_position))
+        self.screen.blit(brain_text, (3 * self.width // 4 - brain_text.get_width() // 2, text_y_position))
+
+        # Draw the agents in the gut context
+        self.draw_agents(self.gut_context.agents(), (50, 100, self.width // 2 - 100, self.height - 200))
+
+        # Draw the agents in the brain context
+        self.draw_agents(self.brain_context.agents(), (self.width // 2 + 50, 100, self.width // 2 - 100, self.height - 200))
+
+    def split(self):
+        # Fill the background color
+        self.screen.fill(self.background_color)
+        # Draw the large border rectangle
+        inner_rect = (50, 50, self.width - 100, self.height - 300)
+        pygame.draw.rect(self.screen, self.border_color, inner_rect)
+        
+        # Draw sections "Gut Environment" and "Brain Environment"
+        gut_text = self.font.render("Gut Environment", True, (0, 0, 0))
+        brain_text = self.font.render("Brain Environment", True, (0, 0, 0))
+        
+        text_y_position = inner_rect[1] - 30
+        
+        self.screen.blit(gut_text, (self.width // 4 - gut_text.get_width() // 2, text_y_position))
+        self.screen.blit(brain_text, (3 * self.width // 4 - brain_text.get_width() // 2, text_y_position))
+
+        # Draw line to separate the two sections
+        pygame.draw.line(self.screen, (0, 0, 0), 
+                        (self.width // 2, inner_rect[1]), 
+                        (self.width // 2, inner_rect[1] + inner_rect[3]), 4)
+
+        # Draw the buttons
+        self.draw_buttons()
+
+        # Draw the legend
+        self.draw_legend()
+
+        # Define the areas for gut and brain contexts
+        # The areas are defined as (x, y, width, height)
+        # The x and y are the top-left corner of the area and the width and height are the dimensions of the area
+        # - 47 and + 3 are used to create a small gap between the border and the agents
+        gut_area = (50, 50, self.width // 2 - 47, self.height - 300)
+        brain_area = (self.width // 2 + 3, 50, self.width // 2 - 50, self.height - 300)
+
+        # Draw agents in the gut context
+        self.draw_agents(self.gut_context.agents(), gut_area)
+        
+        # Draw agents in the brain context
+        self.draw_agents(self.brain_context.agents(), brain_area)
+
+    def run(self):
+        while self.running:
+            for event in pygame.event.get():
+                if (event.type == pygame.QUIT):
+                    self.running = False
+
+            self.split()
+            pygame.display.flip()
+
+        pygame.quit()
+
+    def draw_agents(self, agents, area):
+        radius = 5
+
+        for agent in agents:
+            x_center = area[0] + (agent.pt.x / self.grid_width) * area[2]
+            y_center = area[1] + (agent.pt.y / self.grid_height) * area[3]
+
+            # Adjust x and y to keep the entire circle within the area
+            x = max(area[0] + radius, min(x_center, area[0] + area[2] - radius))
+            y = max(area[1] + radius, min(y_center, area[1] + area[3] - radius))
+
+            if agent.uid[1] == AEP.TYPE:
+                if agent.state == params["aep_state"]["active"]:
+                    color = (0, 255, 0) # Green
+                else:
+                    color = (255, 0, 0) # Red
+            elif agent.uid[1] == Protein.TYPE:
+                if agent.name == params["protein_name"]["tau"]:
+                    color = (173, 216, 230)  # Light Blue
+                else:
+                    color = (255, 255, 128)  # Light Yellow 
+            elif agent.uid[1] == CleavedProtein.TYPE:
+                if agent.name == params["protein_name"]["tau"]:
+                    color = (113, 166, 210)  # Darker Blue               
+                else:
+                    color = (225, 225, 100)  # Darker Yellow
+            elif agent.uid[1] == Oligomer.TYPE:
+                if agent.name == params["protein_name"]["tau"]:
+                    color = (0, 0, 255) # Blue
+                else:
+                    color = (255, 255, 0) # Yellow
+            elif agent.uid[1] == ExternalInput.TYPE:
+                color = (169, 169, 169)  # Dark Grey
+            elif agent.uid[1] == Treatment.TYPE:
+                color = (211, 211, 211)  # Light Grey
+            elif agent.uid[1] == Microglia.TYPE:
+                if agent.state == params["microglia_state"]["resting"]:
+                    color = (144, 238, 144)  # Light Green 
+                else:
+                    color = (0, 100, 0)  # Dark Green
+            elif agent.uid[1] == Neuron.TYPE:
+                if agent.state == params["neuron_state"]["healthy"]:
+                    color = (255, 105, 180)  # Pink
+                elif agent.state == params["neuron_state"]["damaged"]:
+                    color = (255, 69, 0) # Orange-Red
+                else:
+                    color = (0, 0, 0) # Black
+            elif agent.uid[1] == Cytokine.TYPE:
+                if agent.state == params["cyto_state"]["pro_inflammatory"]:
+                    color = (255, 0, 0) # Red
+                else:
+                    color = (0, 255, 255)  # Cyan
+            
+            pygame.draw.circle(self.screen, color, (int(x), int(y)), radius)
+
+    def draw_legend(self):
+        # Define legend position and size
+        legend_x = 60
+        legend_y = self.height - 250  # Adjusted position
+        legend_radius = 6
+        legend_spacing = 35  # Increased spacing between columns
+        text_offset_x = 15
+        row_spacing = 20
+
+        # Define legend title
+        legend_title_font = pygame.font.Font(None, 20)
+        legend_title_surface = legend_title_font.render("Legend:", True, (0, 0, 0))
+        title_width, title_height = legend_title_surface.get_size()
+
+        # Define legend fonts
+        legend_font = pygame.font.Font(None, 18)
+        legend_color = (0, 0, 0)  # Black
+
+        # Define legend items
+        legend_items = {
+            (147, 112, 219): "Active AEP",
+            (128, 0, 128): "Hyperactive AEP",
+            (173, 216, 230): "Tau Protein",
+            (255, 255, 128): "Alpha-syn Protein",
+            (113, 166, 210): "Tau Cleaved",
+            (225, 225, 100): "Alpha-syn Cleaved",
+            (0, 0, 255): "Tau Oligomer",
+            (255, 255, 0): "Alpha-syn Oligomer",
+            (169, 169, 169): "External Input",
+            (211, 211, 211): "Treatment",
+            (144, 238, 144): "Resting Microglia",
+            (0, 100, 0): "Active Microglia",
+            (255, 105, 180): "Healthy Neuron",
+            (255, 69, 0): "Damaged Neuron",
+            (0, 0, 0): "Dead Neuron",
+            (255, 0, 0): "Pro-inflammatory Cytokine",
+            (0, 255, 255): "Anti-inflammatory Cytokine"
+        }
+
+        # Calculate number of items per column
+        items_per_column = len(legend_items) // 2 + len(legend_items) % 2
+
+        # Calculate legend background size
+        legend_width = 400  # Increased width
+        legend_height = items_per_column * row_spacing + 70  # Increased height
+
+        # Calculate legend title position
+        title_x = legend_x + (legend_width - title_width) // 2
+        title_y = legend_y + 10  # Adjusted position
+
+        # Draw legend title
+        self.screen.blit(legend_title_surface, (title_x, title_y))
+
+        # Draw legend items
+        row = 0
+        for color, label in legend_items.items():
+            col = 0 if row < items_per_column else 1
+            circle_x = legend_x + col * (legend_width // 2) + legend_radius  # Adjusted circle x-position
+            circle_y = legend_y + 35 + (row % items_per_column) * row_spacing + legend_radius  # Adjusted circle y-position
+            pygame.draw.circle(self.screen, color, (circle_x, circle_y), legend_radius)
+            legend_text_surface = legend_font.render(label, True, legend_color)
+            text_width, text_height = legend_text_surface.get_size()
+            text_x = legend_x + col * (legend_width // 2) + 2 * legend_radius + text_offset_x  # Adjusted text x-position
+            text_y = circle_y - text_height // 2  # Align text vertically with circle
+            self.screen.blit(legend_text_surface, (text_x, text_y))
+            row += 1
+
+    def draw_buttons(self):
+        # Draw buttons
+        button_font = pygame.font.Font(None, 30)
+        buttons = ["Play", "Stop"]
+        button_width = 120  # Smaller button width
+        button_height = 40  # Smaller button height
+        button_spacing = 10  # Space between buttons
+        
+        total_width = (button_width * len(buttons)) + (button_spacing * (len(buttons) - 1))
+        start_x = (self.width - total_width) // 2
+        
+        for i, button_text in enumerate(buttons):
+            button_x = start_x + i * (button_width + button_spacing)
+            button_rect = pygame.Rect(button_x, self.height - 150, button_width, button_height)
+            pygame.draw.rect(self.screen, (137, 106, 103), button_rect)
+            button_surface = button_font.render(button_text, True, (0, 0, 0))
+            # Center the text on the button
+            button_text_rect = button_surface.get_rect(center=button_rect.center)
+            self.screen.blit(button_surface, button_text_rect.topleft)
+
+            self.button_rects.append((button_rect, button_text))
+
+    def handle_button_click(self, mouse_pos):
+        for button_rect, button_text in self.button_rects:
+            if button_rect.collidepoint(mouse_pos):
+                self.on_button_click(button_text)
+
+    def on_button_click(self, button_text):
+        if button_text == "Back":
+            self.revert_state()
+        elif button_text == "Play":
+            self.paused = False
+        elif button_text == "Stop":
+            self.paused = True
+        elif button_text == "Next":
+            print("Next button clicked")
+            # Add functionality for Next button
 
 @dataclass
 class Log:
@@ -36,8 +284,6 @@ class Log:
     tau_oligomer_brain: int = 0
     cytokine_pro_inflammatory: int = 0
     cytokine_non_inflammatory: int = 0
-
-
 
 @numba.jit((int64[:], int64[:]), nopython=True)
 def is_equal(a1, a2):
@@ -567,7 +813,7 @@ def restore_agent_gut(agent_data: Tuple):
             agent_cache[uid] = agent
         agent.pt = pt
         agent.context = context
-    elif uid[1] == Treatment.Type:
+    elif uid[1] == Treatment.TYPE:
         context = agent_data[3]
         if uid in agent_cache:
             agent = agent_cache[uid]
@@ -639,6 +885,12 @@ class Model():
         self.gut_context.synchronize(restore_agent_gut)
         self.brain_context.synchronize(restore_agent_brain)
 
+        # Initialize Pygame and GUI
+        pygame.init()
+        self.screen = GUI(width=1600, height=800, gut_context=self.gut_context, brain_context=self.brain_context)
+        pygame.display.set_caption("Gut-Brain Axis Model")
+        self.screen.split()
+
     def init_grid(self, name, box, context):
         grid = space.SharedGrid(name=name, bounds=box, borders=space.BorderType.Sticky, occupancy=space.OccupancyType.Multiple, buffer_size=1, comm=self.comm)
         context.add_projection(grid)
@@ -649,7 +901,7 @@ class Model():
         self.runner.schedule_repeating_event(1, 2, self.microbiota_dysbiosis_step)
         self.runner.schedule_repeating_event(1, 5, self.move_cleaved_protein_step)
         self.runner.schedule_repeating_event(1, 1, self.brain_step, priority_type=0)
-        #self.runner.schedule_repeating_event(1, 1, self.check_nervous_system_death, priority_type=1)
+        self.runner.schedule_repeating_event(1, 1, self.pygame_update, priority_type=1)
         self.runner.schedule_stop(params['stop.at'])
         self.runner.schedule_end_event(self.at_end)
 
@@ -686,7 +938,33 @@ class Model():
             pp_count += 1
         return pp_count
 
-    
+    def pygame_update(self):   
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                # If the 'X' button is clicked, stop the simulation
+                print("Ending the simulation.")
+                self.at_end()
+                self.comm.Abort()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.screen.handle_button_click(event.pos)
+
+        while self.screen.paused:
+            for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        # If the 'X' button is clicked, stop the simulation
+                        print("Ending the simulation.")
+                        self.at_end()
+                        self.comm.Abort()
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        self.screen.handle_button_click(event.pos)
+        
+        # Update the Pygame GUI based on the current state of the Repast simulation
+        # This might involve updating the positions of agents, updating variables, etc.
+        self.screen.split() #with buttons
+        #self.screen.update() #without buttons
+        pygame.display.flip()        
+
     #brain step    
     def check_nervous_system_death(self):
         non_dead_neurons_count = 0
@@ -940,7 +1218,6 @@ class Model():
                     self.remove_agent(agent)
                     removed_ids.add(agent.uid) 
 
-
     def log_counts(self):
         tick = self.runner.schedule.tick
 
@@ -1037,16 +1314,15 @@ class Model():
 
     def at_end(self):
         self.data_set.close()
+        pygame.quit()
 
     def start(self):
         self.runner.execute()
-
 
 def run(params: Dict):
     global model      
     model = Model(MPI.COMM_WORLD, params)
     model.start()
-
 
 if __name__ == "__main__":
     parser = parameters.create_args_parser()
