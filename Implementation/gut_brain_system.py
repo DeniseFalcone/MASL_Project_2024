@@ -868,7 +868,7 @@ class Model():
         self.brain_context.synchronize(restore_agent_brain)
         # Initialize Pygame and gui object
         pygame.init()
-        self.screen = GUI(width=1600, height=800, gut_context=self.gut_context, brain_context=self.brain_context)
+        self.screen = GUI(width=1600, height=800, gut_context=self.gut_context, brain_context=self.brain_context, grid_dimensions=(params['world.width'], params['world.height']))
         pygame.display.set_caption("Gut-Brain Axis Model")
         self.screen.update(gut_context=self.gut_context, brain_context=self.brain_context)
 

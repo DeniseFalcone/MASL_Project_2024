@@ -72,7 +72,7 @@ cyto_state : {
     non_inflammatory: "non_inflammatory"
 }
 
-# Mmodel variables
+# Model variables
 world.width: 100
 world.height: 100
 
