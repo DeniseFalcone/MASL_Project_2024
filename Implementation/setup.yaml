@@ -1,41 +1,42 @@
-#gut system variables
-#valori da sistemare (da dividere in base al numero di processi)
+# Gut system
+# Barrier variables
 barrier_impermeability : 50
 barrier_permeability_threshold : 25 
 barrier_permeability_threshold_stop : 20
 barrier_permeability_threshold_start : 30
 
-#letteratura???
+# Microbiota variables
 microbiota_good_bacteria_class : 30000
 microbiota_pathogenic_bacteria_class : 10000
 microbiota_diversity_threshold : 10000
 
-#to start the dysbyosis
-external_input_number : 10
+# To start the dysbyosis
+external_input.count : 10
 external_input : {
-    diet : "diet",  #danneggia poco
-    antibiotics: "antibiotics", #daneggia parecchio
-    stress: "stress" #danneggiamento medio 
+    diet : "diet", 
+    antibiotics: "antibiotics",
+    stress: "stress" 
 }
 
-#the treatment to use
+# The treatment to use
 treatment : True
-treatment_input_number : 10
+treatment_input.count : 10
 
 treatment_input : {
-    diet: "diet", #cura di meno 
-    probiotics: "probiotics" #cura un pò di più
+    diet: "diet", 
+    probiotics: "probiotics" 
 }
 
-aep_enzyme : 50
-tau_proteins : 300
-alpha_syn_proteins : 300
-tau_oligomers : 0
-alpha_syn_oligomers : 0
+# The agents
+aep_enzyme.count : 50
+tau_proteins.count : 300
+alpha_syn_proteins.count : 300
+tau_oligomers_gut.count : 0
+alpha_syn_oligomers_gut.count : 0
 
 protein_name : {
     tau: "tau",
-    alpha_syn: "alpha"
+    alpha_syn: "alpha_syn"
 }
 
 aep_state : {
@@ -43,17 +44,17 @@ aep_state : {
     hyperactive: "hyperactive"
 }
 
-#nervous system variables
+# Nervous system variables
 active_microglia.count: 0
 resting_microglia.count: 50
 neuron_healthy.count: 300
-neuron_damaged.count: 100
+neuron_damaged.count: 0
 neuron_dead.count: 0
 cytokine.count : 0
-alpha_syn_cleaved.count : 100
-alpha_syn_oligomer.count : 0
-tau_cleaved.count : 100
-tau_oligomer.count : 0
+alpha_syn_cleaved_brain.count : 0
+alpha_syn_oligomer_brain.count : 0
+tau_cleaved_brain.count : 0
+tau_oligomer_brain.count : 0
 
 microglia_state : {
     active: "active",
@@ -71,13 +72,14 @@ cyto_state : {
     non_inflammatory: "non_inflammatory"
 }
 
-#model variables
+# Mmodel variables
 world.width: 100
 world.height: 100
 
-
-stop.at : 1000
+# General variables
+stop.at : 500
 gut_log_file: 'output/gut_log.csv'
 brain_log_file: 'output/brain_log.csv'
+log_file: 'output/log_file.csv'
 seed: 42
 

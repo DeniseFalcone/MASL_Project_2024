@@ -8,11 +8,11 @@ import repast4py
 import repast4py.random
 from repast4py.space import DiscretePoint as dpt
 import numba
-import math
 from numba import int32, int64
 from numba.experimental import jitclass
 import pygame
 
+# Class to make the graphics of the simulation
 class GUI:
     def __init__(self, width, height, gut_context, brain_context, grid_dimensions=(100, 100)):
         self.background_color = (202, 187, 185) 
@@ -20,7 +20,6 @@ class GUI:
         self.width = width
         self.height = height
         self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("Simulation")
         self.font = pygame.font.Font(None, 36)
         self.running = True
         self.gut_context = gut_context
@@ -29,76 +28,45 @@ class GUI:
         self.paused = False
         self.button_rects = []
 
-    def update(self):
-        # Fill the background color
-        self.screen.fill((200, 200, 200))
-
-        # Draw sections "Gut Environment" and "Brain Environment"
-        gut_text = self.font.render("Gut Environment", True, (0, 0, 0))
-        brain_text = self.font.render("Brain Environment", True, (0, 0, 0))
-
-        text_y_position = 50
+    # Function to update the screen after each tick
+    def update(self, gut_context, brain_context):
+        # Update contexts
+        self.gut_context, self.brain_context = gut_context, brain_context
         
-        self.screen.blit(gut_text, (self.width // 4 - gut_text.get_width() // 2, text_y_position))
-        self.screen.blit(brain_text, (3 * self.width // 4 - brain_text.get_width() // 2, text_y_position))
-
-        # Draw the agents in the gut context
-        self.draw_agents(self.gut_context.agents(), (50, 100, self.width // 2 - 100, self.height - 200))
-
-        # Draw the agents in the brain context
-        self.draw_agents(self.brain_context.agents(), (self.width // 2 + 50, 100, self.width // 2 - 100, self.height - 200))
-
-    def split(self):
-        # Fill the background color
+        # Fill background and draw border rectangle
         self.screen.fill(self.background_color)
-        # Draw the large border rectangle
         inner_rect = (50, 50, self.width - 100, self.height - 300)
         pygame.draw.rect(self.screen, self.border_color, inner_rect)
         
-        # Draw sections "Gut Environment" and "Brain Environment"
-        gut_text = self.font.render("Gut Environment", True, (0, 0, 0))
-        brain_text = self.font.render("Brain Environment", True, (0, 0, 0))
-        
+        # Draw section titles
         text_y_position = inner_rect[1] - 30
-        
-        self.screen.blit(gut_text, (self.width // 4 - gut_text.get_width() // 2, text_y_position))
-        self.screen.blit(brain_text, (3 * self.width // 4 - brain_text.get_width() // 2, text_y_position))
+        self._draw_centered_text("Gut Environment", self.width // 4, text_y_position)
+        self._draw_centered_text("Brain Environment", 3 * self.width // 4, text_y_position)
 
-        # Draw line to separate the two sections
+        # Draw separating line
         pygame.draw.line(self.screen, (0, 0, 0), 
                         (self.width // 2, inner_rect[1]), 
                         (self.width // 2, inner_rect[1] + inner_rect[3]), 4)
 
-        # Draw the buttons
+        # Draw buttons and legend
         self.draw_buttons()
-
-        # Draw the legend
         self.draw_legend()
 
-        # Define the areas for gut and brain contexts
-        # The areas are defined as (x, y, width, height)
-        # The x and y are the top-left corner of the area and the width and height are the dimensions of the area
-        # - 47 and + 3 are used to create a small gap between the border and the agents
+        # Define areas and draw agents
         gut_area = (50, 50, self.width // 2 - 47, self.height - 300)
         brain_area = (self.width // 2 + 3, 50, self.width // 2 - 50, self.height - 300)
+        self._draw_context_agents(self.gut_context, gut_area)
+        self._draw_context_agents(self.brain_context, brain_area)
 
-        # Draw agents in the gut context
-        self.draw_agents(self.gut_context.agents(), gut_area)
-        
-        # Draw agents in the brain context
-        self.draw_agents(self.brain_context.agents(), brain_area)
+    def _draw_centered_text(self, text, x_center, y):
+        rendered_text = self.font.render(text, True, (0, 0, 0))
+        text_x_position = x_center - rendered_text.get_width() // 2
+        self.screen.blit(rendered_text, (text_x_position, y))
 
-    def run(self):
-        while self.running:
-            for event in pygame.event.get():
-                if (event.type == pygame.QUIT):
-                    self.running = False
+    def _draw_context_agents(self, context, area):
+        self.draw_agents(context.agents(), area)
 
-            self.split()
-            pygame.display.flip()
-
-        pygame.quit()
-
+    # Function to draw agents on the screen
     def draw_agents(self, agents, area):
         radius = 5
 
@@ -110,56 +78,62 @@ class GUI:
             x = max(area[0] + radius, min(x_center, area[0] + area[2] - radius))
             y = max(area[1] + radius, min(y_center, area[1] + area[3] - radius))
 
-            if agent.uid[1] == AEP.TYPE:
-                if agent.state == params["aep_state"]["active"]:
-                    color = (0, 255, 0) # Green
-                else:
-                    color = (255, 0, 0) # Red
-            elif agent.uid[1] == Protein.TYPE:
-                if agent.name == params["protein_name"]["tau"]:
-                    color = (173, 216, 230)  # Light Blue
-                else:
-                    color = (255, 255, 128)  # Light Yellow 
-            elif agent.uid[1] == CleavedProtein.TYPE:
-                if agent.name == params["protein_name"]["tau"]:
-                    color = (113, 166, 210)  # Darker Blue               
-                else:
-                    color = (225, 225, 100)  # Darker Yellow
-            elif agent.uid[1] == Oligomer.TYPE:
-                if agent.name == params["protein_name"]["tau"]:
-                    color = (0, 0, 255) # Blue
-                else:
-                    color = (255, 255, 0) # Yellow
-            elif agent.uid[1] == ExternalInput.TYPE:
-                color = (169, 169, 169)  # Dark Grey
-            elif agent.uid[1] == Treatment.TYPE:
-                color = (211, 211, 211)  # Light Grey
-            elif agent.uid[1] == Microglia.TYPE:
-                if agent.state == params["microglia_state"]["resting"]:
-                    color = (144, 238, 144)  # Light Green 
-                else:
-                    color = (0, 100, 0)  # Dark Green
-            elif agent.uid[1] == Neuron.TYPE:
-                if agent.state == params["neuron_state"]["healthy"]:
-                    color = (255, 105, 180)  # Pink
-                elif agent.state == params["neuron_state"]["damaged"]:
-                    color = (255, 69, 0) # Orange-Red
-                else:
-                    color = (0, 0, 0) # Black
-            elif agent.uid[1] == Cytokine.TYPE:
-                if agent.state == params["cyto_state"]["pro_inflammatory"]:
-                    color = (255, 0, 0) # Red
-                else:
-                    color = (0, 255, 255)  # Cyan
             
+            color = self.get_agent_color(agent)
             pygame.draw.circle(self.screen, color, (int(x), int(y)), radius)
 
+    # Function to get the color of an agent based on its type and state
+    def get_agent_color(self, agent):
+        if agent.uid[1] == AEP.TYPE:
+            if agent.state == params["aep_state"]["active"]:
+                color = (147, 112, 219)
+            else:
+                color = (128, 0, 128)
+        elif agent.uid[1] == Protein.TYPE:
+            if agent.name == params["protein_name"]["tau"]:
+                color = (173, 216, 230)  # Light Blue
+            else:
+                color = (255, 255, 128)  # Light Yellow 
+        elif agent.uid[1] == CleavedProtein.TYPE:
+            if agent.name == params["protein_name"]["tau"]:
+                color = (113, 166, 210)  # Darker Blue               
+            else:
+                color = (225, 225, 100)  # Darker Yellow
+        elif agent.uid[1] == Oligomer.TYPE:
+            if agent.name == params["protein_name"]["tau"]:
+                color = (0, 0, 255) # Blue
+            else:
+                color = (255, 255, 0) # Yellow
+        elif agent.uid[1] == ExternalInput.TYPE:
+            color = (169, 169, 169)  # Dark Grey
+        elif agent.uid[1] == Treatment.TYPE:
+            color = (211, 211, 211)  # Light Grey
+        elif agent.uid[1] == Microglia.TYPE:
+            if agent.state == params["microglia_state"]["resting"]:
+                color = (144, 238, 144)  # Light Green 
+            else:
+                color = (0, 100, 0)  # Dark Green
+        elif agent.uid[1] == Neuron.TYPE:
+            if agent.state == params["neuron_state"]["healthy"]:
+                color = (255, 105, 180)  # Pink
+            elif agent.state == params["neuron_state"]["damaged"]:
+                color = (255, 69, 0) # Orange-Red
+            else:
+                color = (0, 0, 0) # Black
+        elif agent.uid[1] == Cytokine.TYPE:
+            if agent.state == params["cyto_state"]["pro_inflammatory"]:
+                color = (255, 0, 0) # Red
+            else:
+                color = (0, 255, 255)  # Cyan
+        return color
+
+    # Function to draw the legend on the screen
     def draw_legend(self):
         # Define legend position and size
         legend_x = 60
-        legend_y = self.height - 250  # Adjusted position
+        legend_y = self.height - 250  
         legend_radius = 6
-        legend_spacing = 35  # Increased spacing between columns
+        legend_spacing = 35  
         text_offset_x = 15
         row_spacing = 20
 
@@ -197,12 +171,12 @@ class GUI:
         items_per_column = len(legend_items) // 2 + len(legend_items) % 2
 
         # Calculate legend background size
-        legend_width = 400  # Increased width
-        legend_height = items_per_column * row_spacing + 70  # Increased height
+        legend_width = 400  
+        legend_height = items_per_column * row_spacing + 70 
 
         # Calculate legend title position
         title_x = legend_x + (legend_width - title_width) // 2
-        title_y = legend_y + 10  # Adjusted position
+        title_y = legend_y + 10  
 
         # Draw legend title
         self.screen.blit(legend_title_surface, (title_x, title_y))
@@ -211,23 +185,23 @@ class GUI:
         row = 0
         for color, label in legend_items.items():
             col = 0 if row < items_per_column else 1
-            circle_x = legend_x + col * (legend_width // 2) + legend_radius  # Adjusted circle x-position
-            circle_y = legend_y + 35 + (row % items_per_column) * row_spacing + legend_radius  # Adjusted circle y-position
+            circle_x = legend_x + col * (legend_width // 2) + legend_radius  
+            circle_y = legend_y + 35 + (row % items_per_column) * row_spacing + legend_radius  
             pygame.draw.circle(self.screen, color, (circle_x, circle_y), legend_radius)
             legend_text_surface = legend_font.render(label, True, legend_color)
             text_width, text_height = legend_text_surface.get_size()
-            text_x = legend_x + col * (legend_width // 2) + 2 * legend_radius + text_offset_x  # Adjusted text x-position
-            text_y = circle_y - text_height // 2  # Align text vertically with circle
+            text_x = legend_x + col * (legend_width // 2) + 2 * legend_radius + text_offset_x 
+            text_y = circle_y - text_height // 2  
             self.screen.blit(legend_text_surface, (text_x, text_y))
             row += 1
 
+    # Function to draw the play and stop buttons on the screen
     def draw_buttons(self):
-        # Draw buttons
         button_font = pygame.font.Font(None, 30)
         buttons = ["Play", "Stop"]
-        button_width = 120  # Smaller button width
-        button_height = 40  # Smaller button height
-        button_spacing = 10  # Space between buttons
+        button_width = 120  
+        button_height = 40 
+        button_spacing = 10 
         
         total_width = (button_width * len(buttons)) + (button_spacing * (len(buttons) - 1))
         start_x = (self.width - total_width) // 2
@@ -243,24 +217,22 @@ class GUI:
 
             self.button_rects.append((button_rect, button_text))
 
+    # Function to handle mouse clicks on the buttons
     def handle_button_click(self, mouse_pos):
         for button_rect, button_text in self.button_rects:
             if button_rect.collidepoint(mouse_pos):
                 self.on_button_click(button_text)
 
+    # Function to handle button clicks
     def on_button_click(self, button_text):
-        if button_text == "Back":
-            self.revert_state()
-        elif button_text == "Play":
+        if button_text == "Play":
             self.paused = False
         elif button_text == "Stop":
             self.paused = True
-        elif button_text == "Next":
-            print("Next button clicked")
-            # Add functionality for Next button
 
 @dataclass
 class Log:
+    # Gut variables
     aep_active: int = 0
     aep_hyperactive: int = 0
     alpha_protein_gut: int = 0
@@ -272,7 +244,7 @@ class Log:
     barrier_impermeability : int = 0
     microbiota_good_bacteria_class : int = 0
     microbiota_pathogenic_bacteria_class : int = 0
-
+    # Brain variables
     resting_microglia: int = 0
     active_microglia: int = 0
     healthy_neuron: int = 0
@@ -323,6 +295,7 @@ class GridNghFinder:
 
         return np.stack((xs, ys, np.zeros(len(ys), dtype=np.int32)), axis=-1)
     
+# Manages the communication between the gut and brain contexts
 class GutBrainInterface():
     def __init__(self, gut_context, brain_context):
         self.gut_context = gut_context
@@ -332,7 +305,7 @@ class GutBrainInterface():
         repast4py.random.seed = params['seed']
         self.rng = repast4py.random.default_rng
 
-    #unidirectional channel from gut to brain
+    # Unidirectional channel from gut to brain
     def transfer_from_gut_to_brain(self, agent):
         self.brain_context.add(agent)
         pt = self.brain_grid.get_random_local_pt(self.rng)
@@ -351,16 +324,17 @@ class AEP(core.Agent):
         self.pt = pt
         self.context = context
         
-
     def save(self) -> Tuple:
         return (self.uid, self.state, self.pt.coordinates, self.context)
     
+    # returns True if the agent is hyperactive, False otherwise
     def is_hyperactive(self):
         if self.state == params["aep_state"]["active"]:
             return False
         else:
             return True
-        
+
+    # AEP step function   
     def step(self):
         if self.pt is None:
             return
@@ -373,6 +347,7 @@ class AEP(core.Agent):
             random_index = np.random.randint(0, len(nghs_coords))
             model.move(self, dpt(nghs_coords[random_index][0], nghs_coords[random_index][1]), self.context)
 
+    # returns the protein agent in the neighborhood of the agent
     def percepts(self, nghs_coords):
         for ngh_coords in nghs_coords:
             nghs_array = model.gut_grid.get_agents(dpt(ngh_coords[0], ngh_coords[1]))
@@ -381,6 +356,7 @@ class AEP(core.Agent):
                     return ngh  
         return None 
     
+    # cleaves the protein agent
     def cleave(self, protein):
         protein.change_state()
 
@@ -399,6 +375,7 @@ class Protein(core.Agent):
     def save(self) -> Tuple: 
         return (self.uid, self.name, self.pt.coordinates, self.toCleave, self.toRemove, self.context)
     
+    # Protein step function
     def step(self):
         if self.pt is None:
             return
@@ -408,6 +385,7 @@ class Protein(core.Agent):
             chosen_dpt = dpt(nghs_coords[random_index][0], nghs_coords[random_index][1])
             model.move(self, chosen_dpt, self.context)
 
+    # changes the state of the protein agent
     def change_state(self):
         if self.toCleave == False:
             self.toCleave = True
@@ -498,6 +476,7 @@ class Oligomer(core.Agent):
     def save(self) -> Tuple: 
         return (self.uid, self.name, self.pt.coordinates, self.toRemove, self.context)
     
+    # Oligomer step function
     def step(self):
         if self.pt is None:
             return
@@ -529,9 +508,7 @@ class ExternalInput(core.Agent):
     def save(self) -> Tuple:
         return (self.uid, self.input_name, self.pt.coordinates, self.context)
 
-    #if the external input is "diet" or "stress" then the microbiota bacteria decrease in good bacteria classes and increase in pathogenic ones.
-    #otherwise it only decreases the good bacteria classes.
-    #random percentage to change the params of the microbiota
+    # External input step function
     def step(self):
         if model.barrier_impermeability >= model.barrier_permeability_threshold_stop:
             def adjust_bacteria(good_bacteria_factor, pathogenic_bacteria_factor):
@@ -563,9 +540,7 @@ class Treatment(core.Agent):
     def save(self) -> Tuple:
         return (self.uid, self.input_name, self.pt.coordinates, self.context)
 
-    #if the external input is "diet" or "stress" then the microbiota bacteria decrease in good bacteria classes and increase in pathogenic ones.
-    #otherwise it only decreases the good bacteria classes.
-    #random percentage to change the params of the microbiota
+    # Treatment step function
     def step(self):
         if model.barrier_impermeability < model.barrier_permeability_threshold_start:
             def adjust_bacteria(good_bacteria_factor, pathogenic_bacteria_factor):
@@ -583,7 +558,6 @@ class Microglia(core.Agent):
 
     TYPE = 6
 
-    # params["agent_state"]["resting"] state of an agent that is resting
     def __init__(self, local_id: int, rank: int, initial_state, pt: dpt, context):
         super().__init__(id=local_id, type=Microglia.TYPE, rank=rank)
         self.state = initial_state
@@ -593,6 +567,7 @@ class Microglia(core.Agent):
     def save(self) -> Tuple:
         return (self.uid, self.state, self.pt.coordinates, self.context)
 
+    # Microglia step function
     def step(self):
         nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
         ngh = self.check_oligomer_nghs(nghs_coords)
@@ -601,7 +576,8 @@ class Microglia(core.Agent):
                 self.state = params["microglia_state"]["active"]
             else: 
                 ngh.toRemove = True
-            
+
+    # returns the oligomer agent in the neighborhood of the agent     
     def check_oligomer_nghs(self, nghs_coords):
         for ngh_coord in nghs_coords:
             ngh_array = model.brain_grid.get_agents(dpt(ngh_coord[0], ngh_coord[1]))
@@ -624,6 +600,7 @@ class Neuron(core.Agent):
     def save(self) -> Tuple:
         return (self.uid, self.state, self.pt.coordinates, self.toRemove, self.context)
     
+    # Neuron step function
     def step(self): 
         difference_pro_anti_cytokine = model.pro_cytokine - model.anti_cytokine
         if difference_pro_anti_cytokine > 0: 
@@ -633,6 +610,7 @@ class Neuron(core.Agent):
         else:
             pass
     
+    # changes the state of the neuron agent
     def change_state(self):
         if self.state == params["neuron_state"]["healthy"]:
             self.state = params["neuron_state"]["damaged"]
@@ -660,6 +638,7 @@ class Cytokine(core.Agent):
     def save(self) -> Tuple:
         return (self.uid, self.state, self.pt.coordinates, self.context)
     
+    # Cytokine step function
     def step(self): 
         if self.pt is None:
             return
@@ -674,6 +653,7 @@ class Cytokine(core.Agent):
             elif self.state == params["cyto_state"]["non_inflammatory"] and ngh_microglia.state == params["microglia_state"]["active"]:
                 ngh_microglia.state = params["microglia_state"]["resting"]
 
+    # returns the microglia agents in the neighborhood of the agent
     def get_microglie_nghs(self):
         nghs_coords = model.ngh_finder.find(self.pt.x, self.pt.y)
         microglie = []
@@ -686,6 +666,7 @@ class Cytokine(core.Agent):
 
 agent_cache = {}
 
+# Function to restore the agents in the brain context from saved data
 def restore_agent_brain(agent_data: Tuple):
     uid = agent_data[0]
     pt_array = agent_data[2]
@@ -753,6 +734,7 @@ def restore_agent_brain(agent_data: Tuple):
         agent.state = agent_data[1]
     return agent
 
+# Function to restore the agents in the gut context from saved data
 def restore_agent_gut(agent_data: Tuple):
     uid = agent_data[0]
     pt_array = agent_data[2]
@@ -826,36 +808,38 @@ def restore_agent_gut(agent_data: Tuple):
 
 class Model():
 
+    # Initialize the model
     def __init__(self, comm: MPI.Intracomm, params: Dict):
         self.comm = comm
         self.rank = comm.Get_rank()
+        # Create shared contexts for the brain and the gut
         self.gut_context = ctx.SharedContext(comm)
         self.brain_context = ctx.SharedContext(comm)
-
+        # Create shared grids for the brain and the gut
         box = space.BoundingBox(0, params['world.width'] - 1, 0, params['world.height'] - 1, 0, 0)
         self.gut_grid = self.init_grid('gut_grid', box, self.gut_context)
         self.brain_grid = self.init_grid('brain_grid', box, self.brain_context)
 
         self.ngh_finder = GridNghFinder(0, 0, box.xextent, box.yextent)
+        self.gutBrainInterface = GutBrainInterface(self.gut_context, self.brain_context)
+        # Initialize the schedule runner
         self.runner = schedule.init_schedule_runner(comm)
         self.init_schedule(params)
-
-        self.gutBrainInterface = GutBrainInterface(self.gut_context, self.brain_context)
-
+        # Set the seed for the random number generator
         repast4py.random.seed = params['seed']
         self.rng = repast4py.random.default_rng
-
+        # Initialize the log
         self.counts = Log()
         loggers = logging.create_loggers(self.counts, op=MPI.SUM, rank=self.rank)
         self.data_set = logging.ReducingDataSet(loggers, self.comm, params['log_file'], buffer_size=1)
-
+        # Initialize the model parameters
         self.init_microbiota_params(params)
         self.world_size = self.comm.Get_size()
         self.added_agents_id = 0
         self.pro_cytokine = 0
         self.anti_cytokine = 0
         self.dead_neuron = self.calculate_partitioned_count(params['neuron_dead.count'])
-
+        # Initialize the agents
         agent_types_gut = [
             ('aep_enzyme.count', AEP, None),
             ('tau_proteins.count', Protein, params["protein_name"]["tau"]),
@@ -865,7 +849,6 @@ class Model():
             ('alpha_syn_oligomers_gut.count', Oligomer, params["protein_name"]["alpha_syn"]),
             ('tau_oligomers_gut.count', Oligomer, params["protein_name"]["tau"]),
         ]
-
         agent_types_brain = [
             ('neuron_healthy.count', Neuron, 'healthy'),
             ('neuron_damaged.count', Neuron, 'damaged'),
@@ -878,33 +861,35 @@ class Model():
             ('tau_oligomer_brain.count', Oligomer, params["protein_name"]["tau"]),
             ('cytokine.count', Cytokine, None)
         ]
-
         self.distribute_all_agents(agent_types_gut, self.gut_context, self.gut_grid, 'gut')
         self.distribute_all_agents(agent_types_brain, self.brain_context, self.brain_grid, 'brain')
-
+        # Synchronize the contexts
         self.gut_context.synchronize(restore_agent_gut)
         self.brain_context.synchronize(restore_agent_brain)
-
-        # Initialize Pygame and GUI
+        # Initialize Pygame and gui object
         pygame.init()
         self.screen = GUI(width=1600, height=800, gut_context=self.gut_context, brain_context=self.brain_context)
         pygame.display.set_caption("Gut-Brain Axis Model")
-        self.screen.split()
+        self.screen.update(gut_context=self.gut_context, brain_context=self.brain_context)
 
+    # Function to initialize the shared grid
     def init_grid(self, name, box, context):
         grid = space.SharedGrid(name=name, bounds=box, borders=space.BorderType.Sticky, occupancy=space.OccupancyType.Multiple, buffer_size=1, comm=self.comm)
         context.add_projection(grid)
         return grid
-
+    
+    # Function to initialize the schedule
     def init_schedule(self, params):
         self.runner.schedule_repeating_event(1, 1, self.gut_step)
         self.runner.schedule_repeating_event(1, 2, self.microbiota_dysbiosis_step)
         self.runner.schedule_repeating_event(1, 5, self.move_cleaved_protein_step)
         self.runner.schedule_repeating_event(1, 1, self.brain_step, priority_type=0)
         self.runner.schedule_repeating_event(1, 1, self.pygame_update, priority_type=1)
+        self.runner.schedule_repeating_event(1, 1, self.log_counts, priority_type=1)
         self.runner.schedule_stop(params['stop.at'])
         self.runner.schedule_end_event(self.at_end)
 
+    # Function to initialize the microbiota parameters
     def init_microbiota_params(self, params):
         self.microbiota_good_bacteria_class = params["microbiota_good_bacteria_class"]
         self.microbiota_pathogenic_bacteria_class = params["microbiota_pathogenic_bacteria_class"]
@@ -913,12 +898,14 @@ class Model():
         self.barrier_permeability_threshold_stop = params["barrier_permeability_threshold_stop"]
         self.barrier_permeability_threshold_start = params["barrier_permeability_threshold_start"]
 
+    # Function to distribute all agents through the different ranks
     def distribute_all_agents(self, agent_types, context, grid, region):
         for agent_type in agent_types:
             total_count = params[agent_type[0]]
             pp_count = self.calculate_partitioned_count(total_count)
             self.create_agents(agent_type[1], pp_count, agent_type[2], context, grid, region)
 
+    # Function to create agents in the different ranks based on the total count
     def create_agents(self, agent_class, pp_count, state_key, context, grid, region):
         for j in range(pp_count):
             pt = grid.get_random_local_pt(self.rng)
@@ -926,20 +913,22 @@ class Model():
                 agent = agent_class(self.added_agents_id + j, self.rank, params[f"{agent_class.__name__.lower()}_state"][state_key], pt, region)
             elif agent_class in [CleavedProtein, Oligomer, Protein]:
                 agent = agent_class(self.added_agents_id + j, self.rank, params["protein_name"][state_key], pt, region)
-            else:  # For Cytokine and other agents without special state keys
+            else:  
+                # For agents without special state keys
                 agent = agent_class(self.added_agents_id + j, self.rank, pt, region)
             context.add(agent)
             self.move(agent, pt, agent.context)
         self.added_agents_id += pp_count
 
+    # Function to get the total count of agents to create in that rank
     def calculate_partitioned_count(self, total_count):
         pp_count = int(total_count / self.world_size)
         if self.rank < total_count % self.world_size:
             pp_count += 1
         return pp_count
 
+    # Function to update the interface
     def pygame_update(self):   
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 # If the 'X' button is clicked, stop the simulation
@@ -959,26 +948,13 @@ class Model():
                     elif event.type == pygame.MOUSEBUTTONDOWN:
                         self.screen.handle_button_click(event.pos)
         
-        # Update the Pygame GUI based on the current state of the Repast simulation
-        # This might involve updating the positions of agents, updating variables, etc.
-        self.screen.split() #with buttons
-        #self.screen.update() #without buttons
+        # Updates the Pygame GUI based on the current state of the Repast simulation
+        self.screen.update(gut_context=self.gut_context, brain_context=self.brain_context)
         pygame.display.flip()        
 
-    #brain step    
-    def check_nervous_system_death(self):
-        non_dead_neurons_count = 0
-        for agent in self.brain_context.agents():
-            if isinstance(agent, Neuron) and (agent.state == params["neuron_state"]["healthy"] or agent.state == params["neuron_state"]["damaged"]):
-                non_dead_neurons_count += 1
-        
-        if non_dead_neurons_count == 0:
-            print("There are no more alive neurons, ending the simulation.")
-            self.comm.Abort()
-
+    # Brain steps    
     def brain_step(self):
         self.brain_context.synchronize(restore_agent_brain)
-        self.log_counts()
 
         def gather_agents_to_remove():
             return [agent for agent in self.brain_context.agents() if isinstance(agent, (Oligomer, CleavedProtein, Neuron)) and agent.toRemove]
@@ -1056,12 +1032,14 @@ class Model():
                     self.remove_agent(agent)
                     removed_ids.add(agent.uid)
 
+    # Function to remove an agent from the context and the grid
     def remove_agent(self, agent):
         if agent.context == 'brain':
             self.brain_context.remove(agent)
         else:
             self.gut_context.remove(agent)   
 
+    # Function to add a cleaved protein agent to the brain context
     def brain_add_cleaved_protein(self):
         self.added_agents_id += 1
         possible_types = [params["protein_name"]["alpha_syn"], params["protein_name"]["tau"]]
@@ -1072,6 +1050,7 @@ class Model():
         self.brain_context.add(cleaved_protein)   
         self.move(cleaved_protein, cleaved_protein.pt, cleaved_protein.context)
     
+    # Function to add a cleaved protein agent to the gut context
     def gut_add_cleaved_protein(self,cleaved_protein_name):
         self.added_agents_id += 1
         pt = self.gut_grid.get_random_local_pt(self.rng)
@@ -1079,6 +1058,7 @@ class Model():
         self.gut_context.add(cleaved_protein)   
         self.move(cleaved_protein, cleaved_protein.pt, 'gut')
 
+    # Function to add an oligomer protein agent to the brain or gut context
     def add_oligomer_protein(self, oligomer_name, context):
         self.added_agents_id += 1 
         if context == 'brain':
@@ -1092,6 +1072,7 @@ class Model():
             self.gut_context.add(oligomer_protein)        
             self.move(oligomer_protein, oligomer_protein.pt, 'gut') 
              
+    # Function to move an agent to a new location
     def move(self, agent, pt: dpt, context):
         if context == 'brain':
             self.brain_grid.move(agent, pt)
@@ -1099,6 +1080,7 @@ class Model():
             self.gut_grid.move(agent, pt)
         agent.pt = pt
 
+    # Function to add a cytokine agent to the brain context
     def add_cytokine(self):
         self.added_agents_id += 1
         pt = self.brain_grid.get_random_local_pt(self.rng)
@@ -1106,7 +1088,8 @@ class Model():
         self.brain_context.add(cytokine)   
         self.move(cytokine, cytokine.pt, 'brain')
     
-    #gut    
+    # Gut steps 
+    # Function to move the cleaved protein agents 
     def move_cleaved_protein_step(self):
         for agent in self.gut_context.agents():
             if type(agent) == CleavedProtein:
@@ -1118,7 +1101,8 @@ class Model():
                 if agent.alreadyAggregate == False:
                     pt = self.brain_grid.get_random_local_pt(self.rng)
                     self.move(agent, pt, agent.context)
-                   
+
+    # Function to check if the microbiota is dysbiotic and adjust the barrier impermeability 
     def microbiota_dysbiosis_step(self):
         if self.microbiota_good_bacteria_class - self.microbiota_pathogenic_bacteria_class <= self.microbiota_diversity_threshold:
             value_decreased = int((params["barrier_impermeability"]*np.random.randint(0,6))/100) 
@@ -1142,7 +1126,6 @@ class Model():
 
     def gut_step(self):
         self.gut_context.synchronize(restore_agent_gut)
-        self.log_counts()
 
         def gather_agents_to_remove():
             return [agent for agent in self.gut_context.agents() if isinstance(agent, (Oligomer, CleavedProtein, Protein)) and agent.toRemove]
@@ -1218,6 +1201,7 @@ class Model():
                     self.remove_agent(agent)
                     removed_ids.add(agent.uid) 
 
+    # Function to log the counts of the agents
     def log_counts(self):
         tick = self.runner.schedule.tick
 
@@ -1312,13 +1296,16 @@ class Model():
 
         self.data_set.log(tick)
 
+    # Function to close the data set and quit Pygame
     def at_end(self):
         self.data_set.close()
         pygame.quit()
 
+    # Function to start the simulation
     def start(self):
         self.runner.execute()
 
+# Function to run the simulation
 def run(params: Dict):
     global model      
     model = Model(MPI.COMM_WORLD, params)
